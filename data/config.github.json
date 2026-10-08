@@ -1,9 +1,9 @@
 {
   "ai": {
-    "provider": "deepseek",
-    "model": "deepseek-v4-flash",
-    "base_url": "https://api.deepseek.com",
-    "api_key_env": "DEEPSEEK_API_KEY",
+    "provider": "openai",
+    "model": "${LLM_MODEL}",
+    "base_url": "${LLM_BASE_URL}",
+    "api_key_env": "LLM_API_KEY",
     "temperature": 0.3,
     "max_tokens": 8192,
     "throttle_sec": 1,
@@ -175,7 +175,7 @@
   },
   "webhook": {
     "enabled": true,
-    "url_env": "HORIZON_WEBHOOK_URL",
+    "url_env": "FEISHU_WEBHOOK",
     "delivery": "summary_and_items",
     "overview_position": "last",
     "platform": "feishu",
