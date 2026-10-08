@@ -41,7 +41,6 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          LWN_KEY: ${{ secrets.LWN_KEY }}
         run: uv run horizon --hours 24
 
       - name: Set current date as environment variable

@@ -113,13 +113,6 @@
         "enabled": true,
         "category": "semiconductors",
         "profile": "tech-news"
-      },
-      {
-        "name": "LWN.net",
-        "url": "https://lwn.net/headlines/full_text?key=${LWN_KEY}",
-        "enabled": true,
-        "category": "linux-kernel",
-        "profile": "tech-news"
       }
     ],
     "reddit": {
