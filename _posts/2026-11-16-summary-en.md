@@ -5,203 +5,205 @@ date: 2026-11-16
 lang: en
 ---
 
-> From 36 items, 10 important content pieces were selected
+> From 87 items, 9 important content pieces were selected
 
 ---
 
+**AI Engineering / Research**
+1. [Attest 1.1: Replay Agent Runs in CI](#item-ai-tech-1) ⭐️ 10.0/10
+2. [多模态视觉编码解耦研究](#item-ai-tech-2) ⭐️ 9.0/10
+3. [cmt tune accelerates pageable cudaMemcpy on B300](#item-ai-tech-3) ⭐️ 9.0/10
+4. [tenz 0.25 lossless GGUF compression](#item-ai-tech-4) ⭐️ 8.0/10
+5. [Positional Embeddings in Modern LLMs](#item-ai-tech-5) ⭐️ 7.0/10
+6. [Kalaris Agent Skills](#item-ai-tech-6) ⭐️ 7.0/10
+
 **Technology News**
-1. [Meta FAIR &amp; NYU Unbundle Vision Encoding in Multimodal LLMs](#item-tech-news-1) ⭐️ 8.0/10
-2. [Open-source tuner makes Pageable cudaMemcpy 5x faster on B300 GPUs](#item-tech-news-2) ⭐️ 8.0/10
-3. [Jensen Huang may return as Nvidia CEO amid leadership crisis](#item-tech-news-3) ⭐️ 8.0/10
-4. [Protomaps makes self-hosting map tiles cheap and easy](#item-tech-news-4) ⭐️ 7.0/10
-5. [Datasette 1.0a43 adds streaming renderers and view transitions](#item-tech-news-5) ⭐️ 7.0/10
-6. [Interactive Airflow 3 ML orchestration tutorial published in English and Spanish](#item-tech-news-6) ⭐️ 7.0/10
-7. [Meituan open-sources LongCat-2.5, claims training without Nvidia GPUs](#item-tech-news-7) ⭐️ 7.0/10
+1. [uBlock Origin patches universal XSS in element picker](#item-tech-news-1) ⭐️ 8.0/10
+2. [Alibaba releases Qwen4-Max open-weight model with four reasoning levels and cost reductions](#item-tech-news-2) ⭐️ 8.0/10
 
 **Financial News**
-1. [Lutnick faces ethics scrutiny as Cantor cuts Nvidia stake](#item-finance-news-1) ⭐️ 7.0/10
-2. [Electric Bike Certification Pause Limits Consumer Registration](#item-finance-news-2) ⭐️ 7.0/10
-3. [美法官驳回美光三星等 DRAM 价格操纵案撤诉动议](#item-finance-news-3) ⭐️ 7.0/10
+1. [China&\#x27;s October economic data miss forecasts](#item-finance-news-1) ⭐️ 8.0/10
+
+---
+
+## AI Engineering / Research
+
+<a id="item-ai-tech-1"></a>
+### [Attest 1.1: Replay Agent Runs in CI](https://www.reddit.com/r/LLMDevs/comments/1xwy3xy/attest_11_capture_an_agent_run_replay_it_in_ci/) ⭐️ 10.0/10
+
+Attest 1.1 is an Apache-2.0 testing framework for LLM agents in Python and TypeScript, released on November 10. It captures an agent run through a loopback proxy for OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, plus an OTLP receiver, then replays the recording in CI with zero live model calls. It validates behavior with contracts, mutation testing, and optional LLM judges. The author reports that output-only tests caught 0 of 29 mutants, while contracts caught 10 of 29, and that 1.1 fixes four false-pass bugs found in a 73-finding audit of 1.0. The project has no external users yet.
+
+reddit · r/LLMDevs · /u/tom\_mathews · Nov 15, 15:21
+
+**「Method」** The \`attest capture\` command runs the agent behind a loopback proxy, records the trace and every model exchange, redacts secrets, templates volatile values such as IDs and timestamps, and drafts contracts from the observed run. Contracts can assert tool-call cardinality, for example at most one \`issue\_refund\` per \`order\_id\`, or check the end state of a simulated payments API. In PR CI, the current agent code runs while the proxy answers from the recording, so a changed prompt becomes a replay miss with a re-record command rather than a silent mismatch. \`attest policy evaluate\` turns the report into a merge gate with pass, block, and warn outcomes, and failures are annotated on the failing test line. \`attest mutate\` drops, duplicates, and reorders recorded tool calls to measure suite strength. LLM judges run after deterministic layers, and a judge outage or malformed reply is marked not evaluated, never passed. Version 1.1 fixes four false-pass cases involving stdio notification ordering, a timed-out response read by the next test, concurrent Vitest response swapping, and an empty pytest-xdist report accepted by the gate; it also fails unevaluated \`expect\(\)\` chains and blocks PRs that delete baseline assertions.
+
+**「Engineering Takeaway」** Attest is most relevant to agents that change real systems, such as payments, tickets, or infrastructure, where reply-level assertions can miss duplicate side effects. Adoption requires recording representative runs and maintaining behavior or effect contracts; replay removes model cost and latency from CI, but prompt changes force re-recording. The framework is still pre-adoption, with no external users reported, so its coverage beyond the synthetic refund incident is unproven.
+
+**「Open Questions」** The author is seeking design partners and criticism, and the project has no external users yet. It is unclear how well the contract-drafting and mutation-testing workflow generalizes beyond the demo incident.
+
+**Tags**: `#agent-testing`, `#replay`, `#behavior-contracts`, `#mutation-testing`, `#llm-judges`
+
+---
+
+<a id="item-ai-tech-2"></a>
+### [多模态视觉编码解耦研究](https://www.reddit.com/r/MachineLearning/comments/1xx1k2o/meta_fair_nyu_unbundling_multimodal_vision/) ⭐️ 9.0/10
+
+Meta FAIR 与 NYU 的论文（预印本）报道，通过训练 200 多个从零开始的多模态大模型，拆解了视觉编码器的三个设计选择：独立预训练可选、视觉专用参数必需、前置于 LLM 可选。该工作属于 match.md「模型」层，以 Qwen3-1.7B/4B 为主骨架，配 0.4B 视觉容量，在 16 个 Cambrian VQA 基准（448 像素）和 12 个语言基准上评估。可验证事实包括：视觉专用分支在 1.7B 模型上达 45.0 VQA，高于编码器的 44.4 和参数共享的 42.3。
+
+reddit · r/MachineLearning · /u/trungh98 · Nov 15, 17:38
+
+**「方法」** 所有模型在相同数据与计算预算下从零训练，编码器预训练计入多模态总预算。对比了对比学习、自监督及两种字幕目标的预训练编码器，并测试 MetaCLIP 预训练 6.5 倍更长对 ImageNet 线性探测（80.4%→84.4%）与 VQA 的影响。提出「In-fusion」：在 LLM 前 8 层插入零初始化的视觉专用注意力投影与 FFN，文本 token 不占用这些参数。以编码器前置、编码器免及参数共享给 LLM 作为基线，覆盖 0.6B 到 6.4B 骨架规模。
+
+**「工程要点」** 工程接入时，可省略单独的视觉编码器预训练，但必须保留仅供视觉 token 使用的参数；将视觉分支注入 LLM 前层与传统编码器持平，且首 token 时间约降低 13%。前提是团队能承担从零训练 LLM 的计算成本，且结论目前局限于 Qwen3 骨架与 Cambrian 基准，其他模型族和数据组合未在文中验证。
+
+**「未解问题」** 文中未披露超过 6.4B 骨架或非 Qwen3 架构上的表现，也未给出训练稳定性、推理显存占用及更长上下文下的边界情况。
+
+**Tags**: `#multimodal`, `#vision-encoding`, `#LLM-architecture`, `#compute-efficiency`, `#model-scaling`
+
+---
+
+<a id="item-ai-tech-3"></a>
+### [cmt tune accelerates pageable cudaMemcpy on B300](https://www.reddit.com/r/MachineLearning/comments/1xx2n25/making_cudamemcpy_5x_faster_on_a_b300_p/) ⭐️ 9.0/10
+
+cmt tune is an open‑source tool that accelerates pageable cudaMemcpy transfers on NVIDIA B300, raising sustained bandwidth from ~10.2 GB/s to ~51.5 GB/s for 1 GB tensor transfers via torch.to\(&quot;cuda&quot;\). The optimization operates at the application‑interaction layer, improving host‑device data movement for pageable transfers. Key verifiable facts: baseline measured on PyTorch with a 1 GB torch.uint8 tensor; tuned result using \`cmt tune -- python bench.py\`; benchmark conditions specify pageable memory on B300.
+
+reddit · r/MachineLearning · /u/makneeee · Nov 15, 18:20
+
+**「Method」** The cudamemcpy‑tuner tool wraps pageable cudaMemcpy calls and uses a command‑line driver \(cmt tune\) to apply optimized memory‑transfer settings on NVIDIA B300 GPUs. It measures baseline performance \(≈10.2 GB/s for a 1 GB uint8 copy\) and then applies tuned parameters to raise throughput to ≈51.5 GB/s, a ~5× speedup. The implementation is open‑source \(GitHub repo\) and includes a benchmark script that reports GB/s for both CPU→GPU and GPU→CPU directions. The tool is invoked via the cmt tune wrapper, which automates the selection of optimal CUDA memory‑copy flags and stream configurations for pageable memory. Benchmarks confirm the improvement on B300, though performance may vary on other GPUs or with different data types and transfer sizes.
+
+**「Evaluate cmt tune for pageable copies」** For LLM serving and inference paths where pageable cudaMemcpy between host and device is a latency bottleneck, the open-source cmt tune tool is worth evaluating as a concrete optimization. On a B300, it reportedly raised pageable CPU-to-GPU throughput for a 1 GB uint8 tensor from 10.2 GB/s to 51.5 GB/s, about a 5x improvement, though the reported gain may depend on hardware, transfer size, and workload.
+
+<details><summary>References</summary>
+<ul>
+<li><a href="https://agihunt.info/en/p/1a1e07bf9febb7c90bad763fb45">cudamemcpy-tuner speeds up pageable cudaMemcpy… · AGI Hunt</a></li>
+<li><a href="https://x.com/AndrewSignalZ/status/2122141782125535543">Andrew111 on X: &quot;新工具宣称在 NVIDIA B300 上让 pageable cudaMemcp...</a></li>
+<li><a href="https://stackoverflow.com/questions/22345391/cuda-device-memory-copies-cudamemcpydevicetodevice-vs-copy-kernel">c - CUDA device memory copies... - Stack Overflow</a></li>
+<li><a href="https://developer.nvidia.com/blog/how-optimize-data-transfers-cuda-cc/">How to Optimize Data Transfers in CUDA C/C++ | NVIDIA Technical...</a></li>
+<li><a href="https://www.analyticsvidhya.com/blog/2026/10/llm-inference-explained-optimization-techniques/">LLM Inference Explained: Performance and Optimization Guide</a></li>
+
+</ul>
+</details>
+
+**Tags**: `#cudaMemcpy`, `#gpu-optimization`, `#memory-transfer`, `#cmt-tune`, `#benchmark`
+
+---
+
+<a id="item-ai-tech-4"></a>
+### [tenz 0.25 lossless GGUF compression](https://www.reddit.com/r/LLMDevs/comments/1xxfogf/hoarding_ggufs_in_case_hugging_face_changes_fit/) ⭐️ 8.0/10
+
+tenz 0.25 is a lossless GGUF compressor that reduces quantized model file sizes by 7.6–13.1% \(up to 34% for BF16\) while restoring every file byte-for-byte, compatible with llama.cpp, Ollama, and LM Studio, operating in the data knowledge engineering layer of the full-stack system. It parses GGUF structure, codes quantized values and scales with rANS context models fitted to the file, and supports Q3\_K through Q8\_0, F32/F16/BF16, plus tokenizer metadata. Benchmarks on a Poco F5 show compression plus decompression taking ~17 seconds for Qwen3.5-2B Q4\_K\_M, versus ~4 minutes for zstd -19 --long, though decompression remains slower than general-purpose compressors.
+
+reddit · r/LLMDevs · /u/Simpli-curious · Nov 16, 04:03
+
+**「Method」** tenz 0.25 is a dependency-free, single-C-file lossless compressor for GGUF and safetensors that restores files byte-for-byte. It parses the GGUF container, unpacks each block into its real quantized values and scales, and encodes them with context models fitted to the file; rANS with static tables means decompression does not learn anything at runtime. Supported types are Q3\_K, Q4\_K, Q5\_K, Q6\_K, Q4\_0, Q8\_0, F32/F16/BF16, plus metadata, with the tokenizer reported about 80% smaller; unsupported types are stored unchanged. The author reports 8.53% savings on Qwen3.5-2B Q4\_K\_M versus 2.07% for zstd -19 --long and 1.78% for xz -9, 7.6–9.2% across nine Q4\_K\_M models, 13.1% on Qwen3-4B, 13% on Gemma-4-31B QAT Q4\_0, about 7.5% on Q8\_0, and about 34% on BF16; against Aqueous it claims 2–8 points more on quantized models and a tie on BF16. A \`-q\` quick mode trades a fraction of a point for faster coding, for example 8.54% to 8.18% on Qwen3.5-2B with about 44% less Q4\_K work. An experimental \`-g\` OpenCL path reached about 150 MiB/s versus about 250 MiB/s on the phone’s three big CPU cores, required aligned 32-bit stores because byte stores corrupted neighboring bytes on the driver, and always checks the first GPU segment against the CPU; decompression remains slower than zstd or Aqueous, at about 7 s for 1.2 GB on the phone.
+
+**「Tenz 0.25 GGUF compressor: modest size savings, slower decompression」** Tenz 0.25 is a single‑file C lossless compressor for GGUF \(and safetensors\) that achieves 7‑13% size reduction on common quantized formats and up to 34% on BF16, but decompression on a phone takes ~7 s for 1.2 GB because each value is re‑coded, making it ~5–6× slower than zstd or Aqueous. It runs on low‑power devices \(tested on a Poco F5 in Termux\) and supports Q3‑Q8 quantization modes plus metadata; a quick mode \(-q\) trades a fraction of a percent for ~44% less CPU work, while GPU acceleration \(-g\) is experimental and limited by driver bugs.
+
+**Tags**: `#GGUF`, `#lossless-compression`, `#rANS`, `#model-storage`, `#LLMops`
+
+---
+
+<a id="item-ai-tech-5"></a>
+### [Positional Embeddings in Modern LLMs](https://magazine.sebastianraschka.com/p/understanding-positional-embeddings) ⭐️ 7.0/10
+
+This article explains how LLMs encode token position, covering learned absolute embeddings \(GPT-2\), RoPE rotation of queries and keys, NoPE, and learned relative position bias. It sits in the model layer of the match.md stack and surveys positional choices in 2025–2026 open-weight models. Key facts: RoPE remains the most common method; SmolLM3 applies RoPE in three of every four layers; Inkling adds a learned relative bias before softmax. The piece is educational and lacks production benchmarks or direct application-level guidance.
+
+rss · Ahead of AI \(Sebastian Raschka\) · Nov 15, 12:10
+
+**「Method」** GPT-2 adds a learned position vector to each token embedding before the first transformer block. RoPE rotates query and key feature pairs by position-dependent angles inside attention, so the query-key dot product depends only on the relative offset between tokens. NoPE omits explicit positional encoding and relies partly on causal-mask implicit order; a 1.3B code model showed worse next-token prediction at the longest tested lengths. Inkling adds a learned relative position bias to attention scores before softmax. The article includes a small PyTorch RoPE walkthrough and a gallery-based survey of 2025–2026 model releases.
+
+**「Engineering Takeaway」** Useful as model-internals background, but not a drop-in implementation guide for application engineers. RoPE is still the default choice; partial RoPE and NoPE appear in some recent open-weight models without enough published tradeoff data to justify switching. No production latency, memory, or compatibility numbers are provided.
+
+**「Open Questions」** Whether the shift from full RoPE to partial RoPE/NoPE mixes will continue, given the survey groups are still small. How NoPE behaves at very long contexts beyond the tested 1.3B code model.
+
+**Tags**: `#RoPE`, `#positional-embeddings`, `#long-context`, `#transformer-architecture`, `#NoPE`
+
+---
+
+<a id="item-ai-tech-6"></a>
+### [Kalaris Agent Skills](https://www.reddit.com/r/LLMDevs/comments/1xx1lpj/open_source_mit_how_we_stopped_coding_agents_from/) ⭐️ 7.0/10
+
+This open-source MIT repository &quot;Kalaris Agent Skills&quot; supplies 281 modular SKILL.md workflows aimed at stopping LLM hallucinations of citations and preventing repeated failed ML experiments in research agents. It performs deterministic citation verification by running zero‑dependency Python 3.9+ scripts against Crossref, OpenAlex, arXiv, DataCite, and Retraction Watch, classifying .bib entries and requiring human confirmation for mismatches or missing DOIs. The system also runs a two‑loop experiment orchestration \(inner rapid iteration, outer findings.md logging\) and scans prompts for injection using Skill Doctor, while offering selective per‑project installation via npx to avoid context‑window bloat. The toolkit supports Claude Code, Codex, Cursor, OpenCode, Gemini CLI, and Windsurf.
+
+reddit · r/LLMDevs · /u/ProYash239 · Nov 15, 17:40
+
+**「Methodology」** Architecture selects only the SKILL.md and helper scripts for a given repo via \`npx skills add KalarisLabs/research-agent-skills --skill &lt;name&gt;\`, limiting context load. Verification executes a Python script that queries the public APIs \(Crossref, OpenAlex, arXiv, DataCite\) and checks DOI resolution and retractions, outputting verified/found‑add‑doi/mismatch/etc. Negative results are paused for human approval before applying mechanical DOI fixes. Experiment orchestration splits tasks into an inner loop for fast metric trials and an outer loop preserving findings.md, ensuring hypotheses state testable mechanisms and logging of ruled‑out variations. Every skill is evaluated against curated prompt sets for trigger routing accuracy and scanned offline for prompt injection with Skill Doctor. This differs from prior approaches that relied on LLM self‑assessment or session‑wide context compaction.
+
+**「Takeaway」** Adopt for research or technical‑writing agents that need reliable bibliographic grounding and reproducible experiment tracking; prerequisites include internet access to the cited scholarly APIs and willingness to handle human review of mismatched citations. Benefits include reduced citation errors, avoidance of duplicated failed hyperparameter tests, and lower context‑window consumption. Risks involve API latency, potential rate limits, and the absence of benchmark numbers—users should monitor cost and delays. Compatible with the six mentioned assistants, but currently lacks extensions for mechanistic interpretability modules and has no community feedback yet.
+
+**「Open Questions」** No quantitative metrics \(precision, recall, cost, latency\) are publicly reported; no community comments or issue tracker activity were found. The library is still expanding ML evaluation and mechanistic interpretability modules, and the exact set of additional scholarly APIs to add is undecided. Whether the current workflow handles all edge cases \(e.g., newly retired DOIs, non‑standard formats\) remains untested. Users should verify external API uptime and consider adding monitoring for rate limits.
+
+**Tags**: `#citation-verification`, `#context-engineering`, `#agent-skills`, `#experiment-loop`, `#prompt-injection`
 
 ---
 
 ## Technology News
 
 <a id="item-tech-news-1"></a>
-### [Meta FAIR &amp; NYU Unbundle Vision Encoding in Multimodal LLMs](https://www.reddit.com/r/MachineLearning/comments/1xx1k2o/meta_fair_nyu_unbundling_multimodal_vision/) ⭐️ 8.0/10
+### [uBlock Origin patches universal XSS in element picker](https://iter.ca/post/ubo-uxss/) ⭐️ 8.0/10
 
-Meta FAIR and NYU trained over 200 multimodal large language models from scratch to test whether vision encoder pretraining is needed. They found that pretraining the encoder is optional, but vision‑only parameters are required for performance, as shown on Qwen3‑1.7B/4B models with 0.4 B vision capacity across 16 VQA and 12 language benchmarks. Models without dedicated vision parameters lag by up to threefold in compute and underperform on VQA.
+uBlock Origin has patched a universal XSS vulnerability that could be triggered through website-driven use of its element picker, according to the write-up. The flaw stems from the picker interface being placed in the page&\#x27;s DOM, allowing website content to interfere with extension UI. A commenter checking affected installs says users should be on uBlock Origin 1.75.4 or uBO Lite 2026.1110.1816 and above.
 
-reddit · r/MachineLearning · /u/trungh98 · Nov 15, 17:38
+hackernews · zaik · Nov 16, 02:04 · [Discussion](https://news.ycombinator.com/item?id=50513160)
 
-**「Background」** Prior work assumed that vision encoders required separate pretraining and that they bundled pretraining, vision‑only parameters, and placement before the LLM. This study isolates each choice by training models from scratch on the same data and compute budget.
+**「Background」** uBlock Origin&\#x27;s element picker feature allows users to visually select page elements to create custom filter rules, but its implementation placed the picker&\#x27;s interface directly in the website&\#x27;s DOM rather than in the browser&\#x27;s privileged chrome UI. This design pattern—common among extensions that need to interact with page content—creates a security boundary issue because malicious page scripts can manipulate or observe the extension&\#x27;s DOM elements, potentially escalating to universal XSS. The vulnerability was privately reported on November 1, 2026, and patched in uBlock Origin 1.75.4 and uBO Lite 2026.1110.1816.
 
-**「Impact」** Developers can omit costly encoder pretraining while preserving VQA accuracy, provided they include dedicated vision‑only parameters, simplifying training pipelines and reducing compute needs.
+**「Users should update; page-DOM interfaces are the root risk」** A malicious website could trigger one-click universal XSS in the MV2 Firefox version of uBlock Origin by tricking the extension into adding arbitrary trusted filters, with a similar but less problematic issue in MV3 uBO Lite; the fix requires the legitimate picker iframe to include a secret in its initial postMessage so the background script can verify the message&\#x27;s origin. Users on affected builds should update promptly, and extension developers should treat this as evidence that placing privileged interfaces in the website DOM exposes internal identifiers and message channels to attacker-controlled pages.
 
-**Tags**: `#multimodal LLMs`, `#vision encoders`, `#architecture search`, `#empirical study`, `#Meta FAIR`
+**「Community discussion」** Commenters argued that placing extension interfaces in the page DOM is risky beyond this bug, citing password-manager suggestion popups as a possible way to leak which accounts a user has to a website. One commenter asked why the element-picker UI cannot live in browser chrome instead.
+
+<details><summary>References</summary>
+<ul>
+<li><a href="https://github.com/gorhill/uBlock/security/advisories/GHSA-cmqw-9r2w-6wv2">Universal XSS from website-driven element picker</a></li>
+<li><a href="https://github.com/gorhill/uBlock/releases">Releases · gorhill/uBlock · GitHub</a></li>
+<li><a href="https://iter.ca/post/ubo-uxss/">Universal XSS in uBlock Origin from website-driven element picker</a></li>
+<li><a href="https://daily.dev/posts/universal-xss-in-ublock-origin-from-website-driven-element-picker-oqxmui7ak">Universal XSS in uBlock Origin from website-driven...</a></li>
+
+</ul>
+</details>
+
+**Tags**: `#Security`, `#Browser Extensions`, `#XSS`, `#uBlock Origin`, `#Web Security`
 
 ---
 
 <a id="item-tech-news-2"></a>
-### [Open-source tuner makes Pageable cudaMemcpy 5x faster on B300 GPUs](https://www.reddit.com/r/MachineLearning/comments/1xx2n25/making_cudamemcpy_5x_faster_on_a_b300_p/) ⭐️ 8.0/10
+### [Alibaba releases Qwen4-Max open-weight model with four reasoning levels and cost reductions](https://qwen.ai/blog?id=qwen4-max) ⭐️ 8.0/10
 
-An open-source tool called cudamemcpy-tuner makes pageable host-to-device memory copies up to 5x faster on NVIDIA B300 \(Blackwell\) GPUs. The author demonstrates the speedup with a reproducible PyTorch benchmark, where copying a 1 GB tensor improves from 10.2 GB/s to 51.5 GB/s. The tool requires no changes to existing code because pageable memory is the default in PyTorch. The blog post, benchmark code, and GitHub repository are publicly available.
+Alibaba&\#x27;s Qwen team released Qwen4-Max, an open-weight model with a sparse Mixture-of-Experts architecture, 2.4 trillion parameters, and native support for vision and 1-million-token context. The model offers four reasoning effort levels \(none, low, high, xhigh\) and ranked highly in Code Arena blind tests for frontend programming. API pricing was simultaneously reduced, with average task costs dropping from 26.58 Yuan to 11.16 Yuan \(approximately 58% lower\) and token consumption cut by nearly 50%, and the model is currently available while smaller Qwen4 series models and full weight releases are planned.
 
-reddit · r/MachineLearning · /u/makneeee · Nov 15, 18:20
+hackernews · ilreb · Nov 16, 02:14 · [Discussion](https://news.ycombinator.com/item?id=50513215)
 
-**「Background」** Pageable host memory is the default allocation mode in PyTorch and CUDA, but host-to-device transfers using pagable memory are substantially slower than those using pinned \(page-locked\) memory, which NVIDIA&\#x27;s documentation has long recommended for maximizing bandwidth. This performance gap exists because the CUDA driver must stage pagable transfers through a temporary pinned buffer, adding overhead. On newer GPU architectures like the B300 \(Blackwell\), where aggregate bandwidth has increased significantly, the gap between pagable and pinned transfer rates remains a known bottleneck for workloads that do not explicitly pin host memory.
+**「Background」** Qwen4-Max succeeds Alibaba&\#x27;s Qwen3.8 Max flagship, which community members described as capable but slow — one reported roughly 30 tokens per second versus about 80 for a leading competitor, enough to hurt its standing in an agent battle system. Qwen3.8 Max already exposed a reasoning-effort setting \(commenters compared its default\), while Qwen4-Max offers four explicit levels — none, low, high, and xhigh — including a &\#x27;none&\#x27; option that lets users prioritize speed.
 
-**「Impact」** ML practitioners using PyTorch on B300 GPUs can now achieve dramatically faster host-device data transfers by running their workloads through the tuner, without needing to switch to pinned memory. The tool is specifically tuned for the B300 architecture, so users on other NVIDIA GPUs should verify compatibility before relying on it.
+**「Cost Efficiency and Open‑Weight Implications」** Developers can achieve roughly 50% lower inference cost per task with Qwen4-Max, enabling more affordable large‑scale AI applications, while the announced but unconfirmed open‑weight release introduces potential licensing and compatibility considerations for downstream integration.
+
+**「Community Reaction」** One commenter reported that Qwen 3.8&\#x27;s slow generation \(~30 tokens per second\) hindered its use in their battle system. Others highlighted Qwen4-Max&\#x27;s four reasoning levels and substantial cost cuts as significant upgrades for practical workloads.
 
 <details><summary>References</summary>
 <ul>
-<li><a href="https://developer.nvidia.com/blog/how-optimize-data-transfers-cuda-cc/">How to Optimize Data Transfers in CUDA C/C++ | NVIDIA Technical...</a></li>
+<li><a href="https://openrouter.ai/qwen/qwen4-max">Qwen 4 Max - API Pricing &amp; Providers | OpenRouter</a></li>
+<li><a href="https://shattered.io/qwen4-launch-alibaba-open-source-promise-doubt-470-models-2026/">Qwen 4 Launch: Alibaba Open -Source Promise in Doubt</a></li>
 
 </ul>
 </details>
 
-**Tags**: `#cuda`, `#gpu-optimization`, `#memory-transfer`, `#pytorch`, `#blackwell-architecture`
-
----
-
-<a id="item-tech-news-3"></a>
-### [Jensen Huang may return as Nvidia CEO amid leadership crisis](https://www.ft.com/content/0f30a230-4d66-481b-a4fd-3a4ed0c45855) ⭐️ 8.0/10
-
-Jensen Huang is reportedly considering a return to the Nvidia CEO role after resigning last week following two extramarital affairs, one allegedly involving a Chinese spy, which sparked concerns over AI chip exports to China. Allies have formed a Silicon Valley executive “war room” to lobby the board and seek White House backing, with a petition gathering over 156,000 signatures. The board has also begun discussions with Arm CEO Rene Haas as a potential successor.
-
-telegram · zaihuapd · Nov 16, 01:06
-
-**「Background」** The potential return follows Jensen Huang&\#x27;s resignation as Nvidia&\#x27;s president and CEO after reports of extramarital relationships, including one with a woman U.S. intelligence determined was a Chinese spy. Nvidia said Chief Financial Officer Colette Kress would serve as interim CEO, leaving the company to manage both a succession process and national-security scrutiny.
-
-**「Potential export policy shift」** A return of Huang could lead Nvidia to revise its AI chip export controls to China, affecting customers and partners dependent on those products.
-
-<details><summary>References</summary>
-<ul>
-<li><a href="https://tech.yahoo.com/general/breaking-news/article/nvidia-ceo-jensen-huang-resigns-after-extramarital-affairs-raise-national-security-concerns-140401302.html">Nvidia CEO Jensen Huang resigns after extramarital affairs ...</a></li>
-<li><a href="https://www.nytimes.com/2026/11/11/technology/jensen-huang-nvidia-affair.html">Jensen Huang Said to Have Had Relationship With Nvidia ...</a></li>
-
-</ul>
-</details>
-
-**Tags**: `#Nvidia`, `#AI`, `#Semiconductor`, `#Leadership`, `#Geopolitics`
-
----
-
-<a id="item-tech-news-4"></a>
-### [Protomaps makes self-hosting map tiles cheap and easy](https://bruceroettgers.eu/blog/protomaps/) ⭐️ 7.0/10
-
-A blog post by Bruce Roettgers explains how Protomaps, an open-source vector tile format and tooling, has made self-hosting map tiles inexpensive and straightforward. Protomaps uses the PMTiles format — a single-file archive of vector tiles — that can be stored on object storage like Cloudflare R2 and served via edge workers, eliminating per-request API fees from providers such as Mapbox or Google Maps. The author demonstrates that a global base map fits in tens of gigabytes and costs pennies to host, enabling side projects and privacy-sensitive applications to run their own map infrastructure.
-
-hackernews · bcye · Nov 15, 19:26 · [Discussion](https://news.ycombinator.com/item?id=50509837)
-
-**「Background」** Traditional web maps rely on raster or vector tiles served from commercial APIs that charge per map load and require API keys. OpenStreetMap provides the underlying geographic data, but generating and hosting tiles has historically required significant server resources. Protomaps packages OpenStreetMap data into PMTiles — a single SQLite-based file per region or the whole planet — that can be served statically from cheap object storage with HTTP Range requests, removing the need for a tile server.
-
-**「Impact」** Developers can now build map-based applications — such as a Wikipedia walking game that renders live street maps on printed cards — without incurring recurring API costs or exposing user location data to third parties. The approach also reduces load on public tile infrastructure and gives full control over styling, access control, and offline availability.
-
-**「Community discussion」** Commenters note OpenFreeMap as a similar free hosted alternative with no API keys or limits. One developer reports using Cloudflare R2 and Workers for the same self-hosted pattern, and mentions the &\#x27;gloss&\#x27; CLI tool for inspecting PMTiles files. A limitation raised is that high-resolution satellite imagery grows to hundreds of terabytes at zoom levels beyond 17, making full global offline coverage impractical for small budgets. Cloudflare&\#x27;s improved Range request support is cited as a recent enabler.
-
-**Tags**: `#self-hosting`, `#open-source`, `#mapping`, `#web-development`, `#infrastructure`
-
----
-
-<a id="item-tech-news-5"></a>
-### [Datasette 1.0a43 adds streaming renderers and view transitions](https://simonwillison.net/2026/Nov/15/datasette/) ⭐️ 7.0/10
-
-Datasette 1.0a43 adds streaming support for output renderers, enabling the built‑in TSV and CSV export mechanisms to stream rows via the new Response.stream\(\) method and allowing plugins to register streaming renderers. The release also includes security fixes, including a GitHub‑advisory‑listed issue where private stored queries could be exposed, revealing their titles and SQL. Additionally, CSS multi‑page view transitions have been added, providing smoother navigation on Safari and Chrome, with Firefox support expected in Firefox 162 on December 8 2026. The 1.0 milestone is now 53 % complete.
-
-rss · Simon Willison · Nov 15, 23:20
-
-**「Background」** Datasette 1.0a43 moves the project closer to its 1.0 milestone by adding streaming support for output renderers, letting plugins register via Response.stream\(\) to emit rows in one go for TSV/CSV exports, and also provides CSS cross‑document view transitions for multi‑page navigation while patching a security advisory that could leak private query titles and SQL strings. The release also includes dozens of bug fixes, a new datasette-copy-button Web Component for copy‑schema, and improved JSON row representation.
-
-**「Impact」** Developers can now register plugins that stream entire tables, reducing memory usage for large CSV/TSV exports, and the security fix prevents accidental disclosure of private stored queries. Users on Safari and Chrome will see smoother page transitions, while Firefox users must wait for Firefox 162 to benefit.
-
-**Tags**: `#datasette`, `#streaming`, `#open source`, `#software engineering`, `#data tools`
-
----
-
-<a id="item-tech-news-6"></a>
-### [Interactive Airflow 3 ML orchestration tutorial published in English and Spanish](https://www.reddit.com/r/MachineLearning/comments/1xxa13x/handson_ml_orchestration_tutorial_with_airflow3_p/) ⭐️ 7.0/10
-
-Reddit user /u/Total\_Firefighter\_59 has published a self-made, interactive tutorial on ML orchestration with Airflow 3, available in English and Spanish. It reworks Made With ML&\#x27;s orchestration lesson, which the author says was written for Airflow 2, and adds hands-on exercises in some sections along with material the author says is not in the original. According to the post, the first draft was generated with Claude and then took much longer to review and fix than expected. This is a community resource announced on Reddit rather than an official Airflow project release, and the post does not name a specific Airflow 3 point release, a license, or where the material is hosted beyond the Reddit link.
-
-reddit · r/MachineLearning · /u/Total\_Firefighter\_59 · Nov 15, 23:28
-
-**「Airflow 3 launch and interactive ML orchestration tutorial」** Apache Airflow 3.0 is the major release following Airflow 2.x, introducing a fundamental architectural shift to support generative AI and new workflows while preserving Helm chart compatibility with prior Airflow 2 versions. Many users who migrated from Airflow 2 notice that the new APIs and scheduling model differ from their previous setup, so an updated, interactive tutorial with practical exercises was created to teach ML orchestration on Airflow 3.
-
-**「Impact」** Learners following Made With ML&\#x27;s MLOps course now have a bilingual, exercise-based option aimed at Airflow 3, which matters because the author states Airflow 3 differs from the Airflow 2 material that course uses. Because the content is an AI-generated draft that one author reviewed and corrected, and the post does not state which Airflow 3 version the exercises were run against, readers should check the DAG code against official Airflow 3 documentation rather than assume it matches their own deployment.
-
-<details><summary>References</summary>
-<ul>
-<li><a href="https://www.astronomer.io/blog/intro-to-airflow-3/">Introducing Apache Airflow ® 3 : the most significant release in...</a></li>
-<li><a href="https://www.linkedin.com/pulse/apache-airflow-30-here-fatih-aktas-9p50f">Apache Airflow 3 .0 Is Here!</a></li>
-
-</ul>
-</details>
-
-**Tags**: `#ml-orchestration`, `#airflow`, `#tutorial`, `#interactive`, `#mlopts`
-
----
-
-<a id="item-tech-news-7"></a>
-### [Meituan open-sources LongCat-2.5, claims training without Nvidia GPUs](https://the-decoder.com/meituan-releases-a-1-6-trillion-parameter-agent-model-that-never-touched-an-nvidia-gpu/) ⭐️ 7.0/10
-
-Meituan&\#x27;s LongCat team has published the weights for LongCat-2.5, a 1.6-trillion-parameter model aimed at agentic, long-horizon multi-step work such as coding, one week after the model was first announced. The company states that training ran entirely on Chinese chips — Huawei Ascend accelerators — and never on Nvidia GPUs; this is a vendor claim and has not been independently verified. Each token activates roughly 48 billion parameters, the model accepts text, image and video input, and the weights are released under the MIT licence, permitting commercial use. Meituan reports a Terminal Bench v2.1 score of 88.4, slightly below the 89.1 it lists for Claude Opus 5.
-
-telegram · zaihuapd · Nov 15, 11:08
-
-**「Prerequisite context」** LongCat-2.5 is a mixture-of-experts model: of its 1.6 trillion total parameters, roughly 48 billion are activated per token, and it accepts text, image, and video input for agentic, multi-step tasks, especially coding. Terminal Bench v2.1, on which it scored 88.4 versus Claude Opus 5&\#x27;s 89.1, evaluates AI agents on completing real tasks in a terminal environment. The training claim stands out because the team says the entire run used Huawei Ascend accelerators rather than NVIDIA GPUs, which remain the dominant hardware for large-model training.
-
-**「Meituan&\#x27;s Open LongCat-2.5」** The open-source release gives developers and organizations an openly licensed, multimodal option for long-horizon agent and repository-level coding work, with Meituan reporting a Terminal Bench v2.1 score of 88.4. Because the model was described as trained entirely on Huawei Ascend rather than NVIDIA GPUs, it could serve as an alternative for groups building agent pipelines around domestic Chinese AI hardware, though the score trails Claude Opus 5&\#x27;s 89.1. Deployment may also require attention because Huawei Ascend, MetaX, and Muxi reportedly announced inference compatibility.
-
-<details><summary>References</summary>
-<ul>
-<li><a href="https://www.ainchina.com/blog/meituan-longcat-2-trillion-domestic-chips-china-ai-independence-2026/">How Meituan Built a Trillion-Parameter AI Model on 50,000 Domestic...</a></li>
-<li><a href="https://lmspeed.net/model/longcat-2-5">LongCat - 2 . 5 API Pricing &amp; Benchmarks | LMSpeed</a></li>
-
-</ul>
-</details>
-
-**Tags**: `#Meituan`, `#LongCat-2.5`, `#Open Source`, `#NVIDIA GPU`
+**Tags**: `#open-source`, `#AI models`, `#performance`, `#cost`, `#reasoning`
 
 ---
 
 ## Financial News
 
 <a id="item-finance-news-1"></a>
-### [Lutnick faces ethics scrutiny as Cantor cuts Nvidia stake](https://www.cnbc.com/2026/11/13/howard-lutnick-nvidia-jensen-huang-china-cantor-fitzgerald.html) ⭐️ 7.0/10
+### [China&\#x27;s October economic data miss forecasts](https://www.cnbc.com/2026/11/16/china-retail-sales-october-industrial-output-investment.html) ⭐️ 8.0/10
 
-Cantor Fitzgerald, led by Commerce Secretary Howard Lutnick&\#x27;s sons, reported a nearly 50% decline in its Nvidia holdings between September 2025 and March 2026, according to securities filings, while Lutnick resisted White House pressure to crack down on companies suspected of funneling Nvidia chips to China.
+China&\#x27;s October retail sales rose 0.4% year-on-year, missing analysts&\#x27; forecast of 0.8% and slowing from 1.1% in September. Industrial output grew 4.8%, falling short of the 5.3% estimate, and fixed-asset investment contracted 8.1% year-to-date, significantly worse than the 7% decline expected, deepening worries about domestic demand.
 
-rss · CNBC Finance · Nov 15, 19:58
+rss · CNBC Finance · Nov 16, 03:53
 
-**「Background」** Lutnick became Commerce Secretary in February 2025 after departing Cantor Fitzgerald, which his sons Brandon and Kyle now lead, and the firm had disclosed more than 3.5 million Nvidia shares by the end of 2024, making it one of its largest reported positions.
+**「background」** October data mark the latest miss in a 2026 slowdown where retail, industrial, and investment growth have consistently undercut analyst expectations, reflecting lingering weakness from the property-market downturn.
 
-**Tags**: `#Nvidia`, `#export controls`, `#government ethics`, `#Cantor Fitzgerald`, `#China tech policy`
+**「impact」** The property-market downturn has eroded household wealth for a fifth year, weighing on consumer spending despite modest retail sales growth.
 
----
-
-<a id="item-finance-news-2"></a>
-### [Electric Bike Certification Pause Limits Consumer Registration](https://www.peopleapp.com/column/30053564254-500007786629) ⭐️ 7.0/10
-
-Some electric bicycles from major brands, including Ninebot, Yade, Aima, Xinneng and Talin, cannot be registered after their 3C certification was suspended, leaving consumers in places such as Guangzhou and Wuhan unable to complete approval. China&\#x27;s new electric bicycle rules took effect on November 1 with stricter &quot;one vehicle, one charging pile, one code&quot; supervision.
-
-telegram · zaihuapd · Nov 15, 06:08
-
-**「Background」** China&\#x27;s market regulator inspected 201 e-bike makers and found violations such as unauthorized component changes and built-in speed-limit overrides, prompting certification bodies to suspend 3C certificates \(China&\#x27;s mandatory safety mark\); new rules effective November 1 further tightened post-certification oversight with a &quot;one vehicle, one battery, one charger, one code&quot; tracking system.
-
-**「Impact」** The suspension is blocking consumer registration and can leave stores refusing refunds, while brands have not announced a timeline for certification reinstatement.
-
-**Tags**: `#electric bicycles`, `#3C certification`, `#regulation`, `#consumer protection`, `#China`
-
----
-
-<a id="item-finance-news-3"></a>
-### [美法官驳回美光三星等 DRAM 价格操纵案撤诉动议](https://www.tomshardware.com/tech-industry/big-tech/judge-denies-motion-to-dismiss-dram-price-fixing-lawsuit-against-micron-samsung-and-sk-hynix-says-chipmakers-acted-like-hawks-flying-in-formation-finds-evidence-of-dram-collusion-plausible-after-500-percent-price-surge) ⭐️ 7.0/10
-
-A US judge allowed a DRAM price-fixing class action against Micron, Samsung, and SK Hynix to proceed, citing plausible evidence of coordinated supply restrictions that allegedly drove prices up 500%.
-
-telegram · zaihuapd · Nov 15, 16:39
-
-**Tags**: `#antitrust`, `#DRAM`, `#semiconductors`, `#price-fixing`, `#class-action`
+**Tags**: `#China economy`, `#macroeconomic data`, `#industrial output`, `#retail sales`, `#fixed-asset investment`
 
 ---
