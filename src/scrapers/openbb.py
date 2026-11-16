@@ -6,9 +6,8 @@ them into ContentItem instances so the rest of the Horizon pipeline
 same way as RSS or Hacker News items.
 
 The `openbb` package is declared as an optional dependency in
-pyproject.toml. If it is not installed the scraper logs a warning and
-returns an empty list rather than crashing, so a user can enable the
-OpenBB source without blocking the core pipeline.
+pyproject.toml. If it is not installed the scraper reports a source failure;
+other sources can still contribute to the digest.
 
 Design notes:
 
@@ -32,8 +31,9 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, List, Optional
 
 import httpx
+from pydantic import ValidationError
 
-from .base import BaseScraper
+from .base import BaseScraper, FetchResult
 from ..models import ContentItem, OpenBBConfig, OpenBBWatchlist, SourceType
 
 logger = logging.getLogger(__name__)
@@ -62,8 +62,8 @@ class OpenBBScraper(BaseScraper):
 
         Importing ``openbb`` is expensive (loads every registered
         extension), so we do it once at construction time. If the user
-        did not install the ``openbb`` optional extra we log a warning
-        and disable the scraper instead of raising.
+        did not install the ``openbb`` optional extra, fetch() reports the
+        missing dependency in its result.
         """
         try:
             from openbb import obb
@@ -76,42 +76,41 @@ class OpenBBScraper(BaseScraper):
             )
             return None
 
-    async def fetch(self, since: datetime) -> List[ContentItem]:
+    async def fetch(self, since: datetime) -> FetchResult:
         """Fetch items from all enabled OpenBB watchlists.
 
         Args:
             since: Only return items published strictly after this time.
 
         Returns:
-            Deduplicated list of content items across all watchlists.
+            Deduplicated items and per-watchlist failures.
         """
-        if not self._obb or not self.openbb_config.enabled:
-            return []
+        result = FetchResult()
+        if not self.openbb_config.enabled:
+            return result
+        if not self._obb:
+            result.fail("openbb", ImportError("Install the openbb extra to enable this source"))
+            return result
 
         since_utc = self._ensure_utc(since)
-        seen_urls: set[str] = set()
-        items: List[ContentItem] = []
-
+        seen_urls: set[tuple[str, object]] = set()
         for watchlist in self.openbb_config.watchlists:
             if not watchlist.enabled or not watchlist.symbols:
                 continue
-            try:
-                fetched = await self._fetch_watchlist(watchlist, since_utc)
-            except Exception as exc:
-                logger.warning(
-                    "OpenBB watchlist '%s' failed: %s",
-                    watchlist.name,
-                    exc,
-                )
-                continue
-            for item in fetched:
-                url_key = str(item.url)
-                if url_key in seen_urls:
-                    continue
+            await result.collect(watchlist.name, self._fetch_watchlist(watchlist, since_utc))
+        unique = []
+        for item in result.items:
+            # Match cross-source deduplication: distinct editorial routes must survive.
+            if isinstance(item.profile, list):
+                route: object = tuple(profile.strip() for profile in item.profile)
+            else:
+                route = (item.profile or "auto").strip() or "auto"
+            url_key = (str(item.url), route)
+            if url_key not in seen_urls:
                 seen_urls.add(url_key)
-                items.append(item)
-
-        return items
+                unique.append(item)
+        result.items = unique
+        return result
 
     async def _fetch_watchlist(
         self,
@@ -154,9 +153,10 @@ class OpenBBScraper(BaseScraper):
         if published is None or published <= since_utc:
             return None
 
-        title = (getattr(raw, "title", None) or "").strip()
-        if not title:
+        title = getattr(raw, "title", None)
+        if not isinstance(title, str) or not title.strip():
             return None
+        title = title.strip()
 
         body = getattr(raw, "body", None) or getattr(raw, "excerpt", None)
         author = getattr(raw, "author", None)
@@ -171,17 +171,21 @@ class OpenBBScraper(BaseScraper):
             "category": watchlist.category,
         }
 
-        return ContentItem(
-            id=self._generate_id("openbb", "news", native_id),
-            source_type=self.SOURCE_TYPE,
-            title=title,
-            url=url,
-            content=body,
-            author=author or (symbols[0] if symbols else None),
-            published_at=published,
-            profile=watchlist.profile,
-            metadata={k: v for k, v in meta.items() if v is not None},
-        )
+        try:
+            return ContentItem(
+                id=self._generate_id("openbb", "news", native_id),
+                source_type=self.SOURCE_TYPE,
+                title=title,
+                url=url,
+                content=body,
+                author=author or (symbols[0] if symbols else None),
+                published_at=published,
+                profile=watchlist.profile,
+                metadata={k: v for k, v in meta.items() if v is not None},
+            )
+        except ValidationError as exc:
+            logger.warning("Skipping invalid OpenBB article %s: %s", url, exc)
+            return None
 
     @staticmethod
     def _ensure_utc(moment: datetime) -> datetime:

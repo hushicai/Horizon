@@ -1,8 +1,10 @@
 """RSS feed scraper implementation."""
 
+import asyncio
 import calendar
 import hashlib
 import logging
+import math
 import os
 import re
 from datetime import datetime, timezone
@@ -11,11 +13,39 @@ from email.utils import parsedate_to_datetime
 import httpx
 import feedparser
 
-from .base import BaseScraper
+from .base import BaseScraper, FetchResult
 from ..extractors import ExtractorRegistry
 from ..models import ContentItem, SourceType, RSSSourceConfig
 
 logger = logging.getLogger(__name__)
+
+# Identify feed requests: some publishers reject httpx's default User-Agent.
+RSS_USER_AGENT = "Horizon/0.1.0 (+https://github.com/Thysrael/Horizon)"
+MAX_CONCURRENT_FEEDS = 3
+
+# Rate-limited feeds (e.g. Reddit RSS answers bursts with 429) are retried with
+# linear backoff, honouring numeric or HTTP-date Retry-After values up to the cap.
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_BACKOFF_SEC = 15.0
+RATE_LIMIT_MAX_WAIT_SEC = 60.0
+
+
+def _rate_limit_delay(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before retry number ``attempt`` (1-based)."""
+    retry_after = response.headers.get("Retry-After", "")
+    try:
+        delay = float(retry_after)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            delay = math.ceil(
+                (retry_at - datetime.now(timezone.utc)).total_seconds()
+            )
+        except (TypeError, ValueError, OverflowError):
+            delay = RATE_LIMIT_BACKOFF_SEC * attempt
+    return max(0.0, min(delay, RATE_LIMIT_MAX_WAIT_SEC))
 
 
 class RSSScraper(BaseScraper):
@@ -37,30 +67,46 @@ class RSSScraper(BaseScraper):
         super().__init__({"sources": sources}, http_client)
         self._extractors = extractors
 
-    async def fetch(self, since: datetime) -> List[ContentItem]:
+    async def fetch(self, since: datetime) -> FetchResult:
         """Fetch RSS feed items.
 
         Args:
             since: Only fetch items published after this time
 
         Returns:
-            List[ContentItem]: Fetched content items
+            FetchResult: Items and per-feed failures
         """
-        items = []
-        sources = self.config["sources"]
+        result = FetchResult()
+        sources = [source for source in self.config["sources"] if source.enabled]
+        slots = asyncio.Semaphore(MAX_CONCURRENT_FEEDS)
+        host_locks = {source.url.host: asyncio.Lock() for source in sources}
 
-        for source in sources:
-            if not source.enabled:
-                continue
+        async def fetch_source(source: RSSSourceConfig) -> FetchResult:
+            # Wait for the host before occupying a global slot, so queued feeds
+            # from one host cannot prevent other hosts from making progress.
+            async with host_locks[source.url.host], slots:
+                try:
+                    return await self._fetch_feed(source, since)
+                except Exception as exc:
+                    failure = FetchResult()
+                    failure.fail(source.name, exc)
+                    return failure
 
-            feed_items = await self._fetch_feed(source, since)
-            items.extend(feed_items)
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(fetch_source(source)) for source in sources]
 
-        return items
+        # Preserve configured feed order regardless of completion order.
+        for task in tasks:
+            feed_result = task.result()
+            result.items.extend(feed_result.items)
+            result.failures.update(feed_result.failures)
+            result.successful += feed_result.successful
+
+        return result
 
     async def _fetch_feed(
         self, source: RSSSourceConfig, since: datetime
-    ) -> List[ContentItem]:
+    ) -> FetchResult:
         """Fetch items from a single RSS feed.
 
         Args:
@@ -68,39 +114,46 @@ class RSSScraper(BaseScraper):
             since: Only fetch items after this time
 
         Returns:
-            List[ContentItem]: Feed content items
+            FetchResult: Feed content items and entry failures
         """
-        items = []
+        result = FetchResult()
 
-        try:
-            # Expand environment variables in URL (e.g. ${LWN_TOKEN})
-            feed_url = re.sub(
-                r"\$\{(\w+)\}",
-                lambda m: os.environ.get(m.group(1), m.group(0)).strip(),
-                str(source.url),
+        # Expand environment variables in URL (e.g. ${LWN_TOKEN})
+        feed_url = re.sub(
+            r"\$\{(\w+)\}",
+            lambda m: os.environ.get(m.group(1), m.group(0)).strip(),
+            str(source.url),
+        )
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            response = await self.client.get(
+                feed_url,
+                follow_redirects=True,
+                headers={"User-Agent": RSS_USER_AGENT},
             )
+            if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+                break
+            delay = _rate_limit_delay(response, attempt + 1)
+            logger.info(
+                "RSS feed %s rate-limited (429); retrying in %.0fs (%d/%d)",
+                source.name, delay, attempt + 1, RATE_LIMIT_RETRIES,
+            )
+            await asyncio.sleep(delay)
+        response.raise_for_status()
+        feed = feedparser.parse(response.content, response_headers=dict(response.headers))
+        if feed.bozo and not feed.entries and not isinstance(
+            feed.bozo_exception, feedparser.NonXMLContentType
+        ):
+            raise ValueError("Invalid RSS/Atom feed")
 
-            # Fetch feed content
-            response = await self.client.get(feed_url, follow_redirects=True)
-            response.raise_for_status()
-
-            # Parse feed
-            feed = feedparser.parse(response.text)
-
-            for entry in feed.entries:
-                # Parse published date
+        for ordinal, entry in enumerate(feed.entries, start=1):
+            try:
                 published_at = self._parse_date(entry)
                 if not published_at or published_at < since:
                     continue
 
-                # Generate unique ID from feed URL and entry ID
                 feed_id = str(source.url).split("//")[1].replace("/", "_")
                 entry_id = entry.get("id", entry.get("link", ""))
-                entry_hash = hashlib.sha256(str(entry_id).encode("utf-8")).hexdigest()[
-                    :16
-                ]
-
-                # Extract content
+                entry_hash = hashlib.sha256(str(entry_id).encode("utf-8")).hexdigest()[:16]
                 content = self._extract_content(entry)
 
                 if source.content_extractor and self._extractors:
@@ -112,7 +165,7 @@ class RSSScraper(BaseScraper):
                             if full:
                                 content = full
 
-                item = ContentItem(
+                result.items.append(ContentItem(
                     id=self._generate_id("rss", feed_id, entry_hash),
                     source_type=SourceType.RSS,
                     title=entry.get("title", "Untitled"),
@@ -126,15 +179,18 @@ class RSSScraper(BaseScraper):
                         "category": source.category,
                         "tags": [tag.term for tag in entry.get("tags", [])],
                     },
-                )
-                items.append(item)
+                ))
+            except Exception as exc:
+                label = f"{source.name}/entry:{ordinal}"
+                # Avoid multiline validation details that include entry values.
+                reason = str(exc).partition("\n")[0][:200]
+                error = f"{type(exc).__name__}: {reason}"
+                result.failures[label] = error
+                logger.warning("Skipping RSS entry %s: %s", label, error)
 
-        except httpx.HTTPError as e:
-            logger.warning("Error fetching RSS feed %s: %s", source.name, e)
-        except Exception as e:
-            logger.warning("Error parsing RSS feed %s: %s", source.name, e)
-
-        return items
+        # A feed with only rejected entries is not a successful empty response.
+        result.successful = int(bool(result.items) or not result.failures)
+        return result
 
     def _parse_date(self, entry: dict) -> datetime:
         """Parse publication date from feed entry.
@@ -174,13 +230,27 @@ class RSSScraper(BaseScraper):
         Returns:
             str: Extracted text content
         """
-        # Try different content fields
-        if "summary" in entry:
-            return entry.summary
-        if "description" in entry:
-            return entry.description
-        if "content" in entry and entry.content:
-            # content is usually a list
-            return entry.content[0].get("value", "")
-
-        return ""
+        content = entry.get("content", [])
+        if not isinstance(content, (list, tuple)):
+            content = []
+        candidates = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            media_type = part.get("type", "")
+            if not isinstance(media_type, str):
+                continue
+            media_type = media_type.split(";", 1)[0].strip().lower()
+            if media_type and not (
+                media_type.startswith("text/")
+                or media_type in ("html", "xhtml", "application/xhtml+xml")
+            ):
+                continue
+            candidates.append(part.get("value"))
+        # max keeps the first candidate on ties, so prefer content alternatives.
+        candidates.extend([entry.get("summary"), entry.get("description")])
+        return max(
+            (value for value in candidates if isinstance(value, str) and value.strip()),
+            key=len,
+            default="",
+        )

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 from bs4 import BeautifulSoup
 
 from src.models import TelegramChannelConfig, TelegramConfig
@@ -93,13 +94,14 @@ def test_fetch_channel_uses_alternate_domain_after_dns_failure() -> None:
             )
             return await scraper.fetch(datetime(2026, 7, 6, 0, 0, tzinfo=timezone.utc))
 
-    items = asyncio.run(fetch_items())
+    result = asyncio.run(fetch_items())
 
     assert requested_hosts == ["telegram.me", "telegram.dog"]
-    assert len(items) == 1
+    assert len(result.items) == 1
+    assert result.status == "success"
 
 
-def test_fetch_raises_when_all_telegram_endpoints_fail() -> None:
+def test_fetch_reports_failure_when_all_telegram_endpoints_fail() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("Name or service not known", request=request)
 
@@ -111,9 +113,60 @@ def test_fetch_raises_when_all_telegram_endpoints_fail() -> None:
             )
             return await scraper.fetch(datetime(2026, 7, 6, 0, 0, tzinfo=timezone.utc))
 
-    try:
-        asyncio.run(fetch_items())
-    except RuntimeError as exc:
-        assert "All Telegram channels failed" in str(exc)
-    else:
-        raise AssertionError("Expected all Telegram endpoint failures to propagate")
+    result = asyncio.run(fetch_items())
+    assert result.status == "failure"
+    assert "All Telegram endpoints failed" in result.failures["channel"]
+
+
+def test_canonical_link_uses_hosts_instead_of_telegram_text():
+    cfg = TelegramChannelConfig(channel="example")
+    scraper = TelegramScraper(TelegramConfig(channels=[cfg]), AsyncMock())
+    message = BeautifulSoup('''
+      <div data-post="example/1"><time datetime="2030-01-01T00:00:00Z"></time>
+      <div class="tgme_widget_message_text js-message_text">Article
+        <a href="http://[broken">Malformed publisher link</a>
+        <a href="https://t.me/other/1">Channel link</a>
+        <a href="https://telegram.me/other/2">Forwarded channel</a>
+        <a href="https://example.org/t.me-analysis">Publisher article</a>
+      </div></div>''', "html.parser").div
+    item = scraper._parse_message(message, cfg, datetime(2029, 1, 1, tzinfo=timezone.utc))
+    assert str(item.url) == "https://example.org/t.me-analysis"
+
+
+@pytest.mark.parametrize("header,expected", [
+    ("7", 7),
+    ("Mon, 01 Jan 2029 00:00:07 GMT", 7),
+    ("Sun, 31 Dec 2028 23:59:00 GMT", 0),
+    ("try later", 5),
+])
+def test_retry_after_supports_delay_and_http_date(header, expected, monkeypatch):
+    import src.scrapers.telegram as module
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2029, 1, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(module, "datetime", Clock)
+    sleep = AsyncMock()
+    monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) <= 2:
+            return httpx.Response(429, headers={"Retry-After": header})
+        return httpx.Response(200, text="<html><body>No posts</body></html>")
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            cfg = TelegramChannelConfig(channel="example")
+            return await TelegramScraper(TelegramConfig(channels=[cfg]), client).fetch(
+                datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+
+    result = asyncio.run(run())
+    assert result.status == "empty"
+    assert result.successful == 1
+    sleep.assert_awaited_once_with(expected)
+    assert [request.url.host for request in requests] == ["telegram.me", "telegram.me", "telegram.dog"]

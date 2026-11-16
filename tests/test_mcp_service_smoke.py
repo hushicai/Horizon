@@ -21,6 +21,7 @@ from src.models import (
 from src.ai.summarizer import DailySummarizer
 from src.ai.enricher import EnrichmentBatchResult
 from src.mcp.server import hz_get_metrics
+from src.mcp.errors import HorizonMcpError
 from src.mcp.service import HorizonPipelineService
 from src.orchestrator import (
     BalancedDigestResult,
@@ -79,6 +80,32 @@ def test_validate_config_smoke(tmp_path: Path) -> None:
     assert result["config_path"] == str(config_path.resolve())
     assert result["enabled_sources"]
     assert result["missing_env"] == []
+
+
+def test_validate_config_rejects_unknown_group_by_profile(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    config = json.loads(
+        (repo_root / "data" / "config.example.json").read_text(encoding="utf-8")
+    )
+    config["digest"]["group_by"] = "profile"
+    config["digest"]["category_groups"] = {
+        "tech": {"limit": 1, "categories": ["tech-news", "missing-profile"]}
+    }
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    service = HorizonPipelineService(runs_root=tmp_path / "mcp-runs")
+    with pytest.raises(HorizonMcpError) as exc_info:
+        asyncio.run(
+            service.validate_config(
+                horizon_path=str(repo_root),
+                config_path=str(config_path),
+                check_env=False,
+            )
+        )
+
+    assert exc_info.value.code == "HZ_CONFIG_INVALID"
+    assert "missing-profile" in exc_info.value.details["error"]
 
 
 def test_get_effective_config_can_filter_sources(tmp_path: Path) -> None:
@@ -159,29 +186,30 @@ def test_fetch_items_uses_public_orchestrator_api(tmp_path: Path, monkeypatch) -
             SimpleNamespace(
                 horizon_path=tmp_path,
                 config_path=config_path,
-                runtime=SimpleNamespace(),
                 config=SimpleNamespace(),
             ),
             ["rss"],
             [],
         ),
     )
-    monkeypatch.setattr("src.mcp.service.make_storage", lambda runtime, config_path: object())
+    monkeypatch.setattr("src.mcp.service.make_storage", lambda config_path: object())
 
     class FakeOrchestrator:
+        last_fetch_report = None
+
         async def fetch_all_sources(self, since):  # type: ignore[no-untyped-def]
             return [make_item("item-1"), make_item("item-2")]
 
         def merge_cross_source_duplicates(self, items):  # type: ignore[no-untyped-def]
             return items[:1]
 
-    def build_orchestrator(runtime, config, storage, console, profiles):  # type: ignore[no-untyped-def]
+    def build_orchestrator(config, storage, console, profiles):  # type: ignore[no-untyped-def]
         assert console is service.console
         assert profiles is PROFILES
         return FakeOrchestrator()
 
     monkeypatch.setattr(
-        "src.mcp.service.make_orchestrator",
+        "src.mcp.service.HorizonOrchestrator",
         build_orchestrator,
     )
 
@@ -190,6 +218,26 @@ def test_fetch_items_uses_public_orchestrator_api(tmp_path: Path, monkeypatch) -
     assert result["fetched"] == 1
     assert result["raw_before_merge"] == 2
     assert service.run_store.load_items(result["run_id"], "raw")[0]["id"] == "item-1"
+
+
+def test_fetch_items_reports_run_id_collision_without_replacing_existing_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = HorizonPipelineService(runs_root=tmp_path / "mcp-runs")
+    run_id = service.run_store.create_run("run-existing")
+    service.run_store.save_items(run_id, "raw", [{"id": "original"}])
+
+    monkeypatch.setattr(
+        service,
+        "_build_context",
+        lambda **kwargs: (SimpleNamespace(), ["rss"], []),
+    )
+    monkeypatch.setattr(service, "_orchestrator", lambda ctx: object())
+
+    with pytest.raises(HorizonMcpError, match="HZ_RUN_ID_EXISTS"):
+        asyncio.run(service.fetch_items(hours=6, run_id=run_id))
+
+    assert service.run_store.load_items(run_id, "raw") == [{"id": "original"}]
 
 
 def test_fetch_items_includes_fetch_report_in_response_and_metadata(
@@ -206,14 +254,13 @@ def test_fetch_items_includes_fetch_report_in_response_and_metadata(
             SimpleNamespace(
                 horizon_path=tmp_path,
                 config_path=config_path,
-                runtime=SimpleNamespace(),
                 config=SimpleNamespace(),
             ),
             ["rss", "github"],
             [],
         ),
     )
-    monkeypatch.setattr("src.mcp.service.make_storage", lambda runtime, config_path: object())
+    monkeypatch.setattr("src.mcp.service.make_storage", lambda config_path: object())
 
     class FakeOrchestrator:
         last_fetch_report = FetchReport(
@@ -230,8 +277,8 @@ def test_fetch_items_includes_fetch_report_in_response_and_metadata(
             return items
 
     monkeypatch.setattr(
-        "src.mcp.service.make_orchestrator",
-        lambda runtime, config, storage, console, profiles: FakeOrchestrator(),
+        "src.mcp.service.HorizonOrchestrator",
+        lambda config, storage, console, profiles: FakeOrchestrator(),
     )
 
     result = asyncio.run(service.fetch_items(hours=6))
@@ -254,13 +301,12 @@ def test_filter_items_uses_public_filtering_pipeline_api(tmp_path: Path, monkeyp
         lambda **kwargs: (
             [make_item("item-1", score=9.0), make_item("item-2", score=8.0)],
             SimpleNamespace(
-                runtime=SimpleNamespace(),
                 config_path=tmp_path / "config.json",
-                config=SimpleNamespace(digest=SimpleNamespace()),
+                config=SimpleNamespace(ai=SimpleNamespace(provider="openai"), digest=SimpleNamespace()),
             ),
         ),
     )
-    monkeypatch.setattr("src.mcp.service.make_storage", lambda runtime, config_path: object())
+    monkeypatch.setattr("src.mcp.service.make_storage", lambda config_path: object())
 
     class FakeOrchestrator:
         async def select_digest_items(self, items, **kwargs):  # type: ignore[no-untyped-def]
@@ -276,8 +322,8 @@ def test_filter_items_uses_public_filtering_pipeline_api(tmp_path: Path, monkeyp
             )
 
     monkeypatch.setattr(
-        "src.mcp.service.make_orchestrator",
-        lambda runtime, config, storage, console, profiles: FakeOrchestrator(),
+        "src.mcp.service.HorizonOrchestrator",
+        lambda config, storage, console, profiles: FakeOrchestrator(),
     )
 
     result = asyncio.run(service.filter_items(run_id="run-topic-dedup", topic_dedup=True))
@@ -302,13 +348,12 @@ def test_filter_items_applies_balanced_digest(tmp_path: Path, monkeypatch) -> No
         lambda **kwargs: (
             [make_item("item-1", score=9.0), make_item("item-2", score=8.0)],
             SimpleNamespace(
-                runtime=SimpleNamespace(),
                 config_path=tmp_path / "config.json",
                 config=SimpleNamespace(digest=filtering),
             ),
         ),
     )
-    monkeypatch.setattr("src.mcp.service.make_storage", lambda runtime, config_path: object())
+    monkeypatch.setattr("src.mcp.service.make_storage", lambda config_path: object())
 
     class FakeOrchestrator:
         async def select_digest_items(self, items, **kwargs):  # type: ignore[no-untyped-def]
@@ -328,8 +373,8 @@ def test_filter_items_applies_balanced_digest(tmp_path: Path, monkeypatch) -> No
             )
 
     monkeypatch.setattr(
-        "src.mcp.service.make_orchestrator",
-        lambda runtime, config, storage, console, profiles: FakeOrchestrator(),
+        "src.mcp.service.HorizonOrchestrator",
+        lambda config, storage, console, profiles: FakeOrchestrator(),
     )
 
     result = asyncio.run(
@@ -348,6 +393,7 @@ def test_filter_items_matches_native_filtering_pipeline(tmp_path: Path, monkeypa
     service.run_store.create_run("run-parity")
     filtering = DigestConfig(max_items=1)
     config = SimpleNamespace(
+        ai=SimpleNamespace(provider="openai"),
         digest=filtering,
         processing=ProcessingConfig(
             profile_settings={
@@ -386,16 +432,15 @@ def test_filter_items_matches_native_filtering_pipeline(tmp_path: Path, monkeypa
         lambda **kwargs: (
             items,
             SimpleNamespace(
-                runtime=SimpleNamespace(),
                 config_path=tmp_path / "config.json",
                 config=config,
             ),
         ),
     )
-    monkeypatch.setattr("src.mcp.service.make_storage", lambda runtime, config_path: object())
+    monkeypatch.setattr("src.mcp.service.make_storage", lambda config_path: object())
     monkeypatch.setattr(
-        "src.mcp.service.make_orchestrator",
-        lambda runtime, loaded_config, storage, console, profiles: make_filtering_orchestrator(),
+        "src.mcp.service.HorizonOrchestrator",
+        lambda loaded_config, storage, console, profiles: make_filtering_orchestrator(),
     )
 
     mcp_result = asyncio.run(service.filter_items(run_id="run-parity"))
@@ -432,6 +477,7 @@ def test_generate_summary_persists_informative_empty_summary(
             )
 
     monkeypatch.setattr(service, "_profiles", lambda ctx: PROFILES)
+    monkeypatch.setattr("src.mcp.service.DailySummarizer", RecordingSummarizer)
     service.run_store.create_run("run-empty")
     service.run_store.save_items("run-empty", "raw", [])
     service.run_store.save_items("run-empty", "filtered", [])
@@ -441,7 +487,6 @@ def test_generate_summary_persists_informative_empty_summary(
         "_build_context",
         lambda **kwargs: (
             SimpleNamespace(
-                runtime=SimpleNamespace(DailySummarizer=RecordingSummarizer),
                 config=SimpleNamespace(
                     digest=SimpleNamespace(profile_order=profile_order)
                 ),
@@ -567,8 +612,7 @@ def test_enrich_items_propagates_batch_failure(tmp_path: Path, monkeypatch) -> N
             raise RuntimeError("enrichment failed")
 
     ctx = SimpleNamespace(
-        runtime=SimpleNamespace(),
-        config=SimpleNamespace(ai=SimpleNamespace(languages=["en"])),
+        config=SimpleNamespace(ai=SimpleNamespace(provider="openai", languages=["en"])),
     )
     monkeypatch.setattr(service, "_load_stage_items", lambda **kwargs: ([item], ctx))
     monkeypatch.setattr(service, "_orchestrator", lambda loaded_ctx: FailingOrchestrator())
@@ -593,8 +637,7 @@ def test_enrich_items_reports_partial_failure_truthfully(
             )
 
     ctx = SimpleNamespace(
-        runtime=SimpleNamespace(),
-        config=SimpleNamespace(ai=SimpleNamespace(languages=["en"])),
+        config=SimpleNamespace(ai=SimpleNamespace(provider="openai", languages=["en"])),
     )
     monkeypatch.setattr(
         service,
@@ -631,7 +674,7 @@ def test_enrich_items_does_not_create_stage_when_all_items_fail(
                 failures={item.id: "ValueError: empty story"}
             )
 
-    ctx = SimpleNamespace(runtime=SimpleNamespace(), config=SimpleNamespace())
+    ctx = SimpleNamespace(config=SimpleNamespace(ai=SimpleNamespace(provider="openai")))
     monkeypatch.setattr(service, "_load_stage_items", lambda **kwargs: ([item], ctx))
     monkeypatch.setattr(service, "_orchestrator", lambda loaded_ctx: FailingOrchestrator())
 

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from html import unescape
 from typing import List, Optional
@@ -10,7 +11,7 @@ from typing import List, Optional
 from dateutil.parser import isoparse
 import httpx
 
-from .base import BaseScraper
+from .base import BaseScraper, FetchResult
 from ..models import ContentItem, SourceType, TwitterConfig
 
 logger = logging.getLogger(__name__)
@@ -27,30 +28,27 @@ class TwitterScraper(BaseScraper):
         super().__init__(config, http_client)
         self.config = config
 
-    async def fetch(self, since: datetime) -> List[ContentItem]:
+    async def fetch(self, since: datetime) -> FetchResult:
+        result = FetchResult()
         if not self.config.enabled:
-            return []
+            return result
 
         users = [u.strip().lstrip("@") for u in self.config.users if u.strip()]
         keywords = [k.strip() for k in self.config.keywords if k.strip()]
         if not users and not keywords:
             logger.debug("No Twitter users or keywords configured, skipping.")
-            return []
+            return result
 
         token = os.environ.get(self.config.apify_token_env)
         if not token:
-            logger.warning(
-                f"Apify token not found in env var '{self.config.apify_token_env}'. Skipping Twitter."
-            )
-            return []
+            result.fail("credentials", ValueError(f"Missing environment variable: {self.config.apify_token_env}"))
+            return result
 
-        items: List[ContentItem] = []
-        seen_ids: set[str] = set()
         max_items = max(100, self.config.fetch_limit)
 
         if users:
             logger.info(f"Fetching Twitter (Apify) for users: {users}")
-            await self._collect_from_payload(
+            await result.collect("profiles", self._collect_from_payload(
                 token,
                 {
                     "source_mode": "profiles",
@@ -59,52 +57,45 @@ class TwitterScraper(BaseScraper):
                     "max_items": max_items,
                 },
                 since,
-                items,
-                seen_ids,
-            )
+            ))
 
         for keyword in keywords:
             logger.info(f"Fetching Twitter (Apify) search for keyword: {keyword}")
-            try:
-                await self._collect_from_payload(
-                    token,
-                    {
-                        "source_mode": "search",
-                        "search_query": keyword,
-                        "search_sort": "Latest",
-                        "max_items": max_items,
-                    },
-                    since,
-                    items,
-                    seen_ids,
-                )
-            except Exception as exc:
-                logger.error(f"Keyword search failed for {keyword!r}: {exc}")
+            await result.collect(f"search:{keyword}", self._collect_from_payload(
+                token,
+                {
+                    "source_mode": "search",
+                    "search_query": keyword,
+                    "search_sort": "Latest",
+                    "max_items": max_items,
+                },
+                since,
+            ))
 
-        logger.info(f"Fetched {len(items)} tweets via Apify.")
-        return items
+        result.items = list({item.id: item for item in result.items}.values())
+        logger.info("Fetched %d tweets via Apify.", len(result.items))
+        return result
 
     async def _collect_from_payload(
         self,
         token: str,
         payload: dict,
         since: datetime,
-        items: List[ContentItem],
-        seen_ids: set[str],
-    ) -> None:
+    ) -> List[ContentItem]:
         run_id, dataset_id = await self._start_run_with_payload(token, payload)
         if not run_id or not dataset_id:
-            return
+            raise RuntimeError("Apify did not return a run and dataset ID")
         if not await self._wait_for_run(token, run_id):
-            return
+            raise RuntimeError("Apify run failed or timed out")
         raw_items = await self._fetch_dataset(token, dataset_id)
+        items = []
         for raw in raw_items:
             if isinstance(raw, dict) and raw.get("noResults"):
                 continue
             parsed = self._parse_item(raw, since)
-            if parsed and parsed.id not in seen_ids:
-                seen_ids.add(parsed.id)
+            if parsed:
                 items.append(parsed)
+        return items
 
     async def _start_run_with_payload(
         self, token: str, payload: dict
@@ -119,8 +110,7 @@ class TwitterScraper(BaseScraper):
             logger.debug(f"Started Apify run {run_id}, dataset {dataset_id}")
             return run_id, dataset_id
         except Exception as exc:
-            logger.error(f"Failed to start Apify run: {exc}")
-            return None, None
+            raise RuntimeError("Failed to start Apify run") from exc
 
     async def _start_run(
         self, token: str, users: List[str]
@@ -137,10 +127,13 @@ class TwitterScraper(BaseScraper):
 
     async def _wait_for_run(self, token: str, run_id: str) -> bool:
         url = f"{_APIFY_BASE}/actor-runs/{run_id}?token={token}"
-        elapsed = 0.0
-        while elapsed < _MAX_WAIT:
+        deadline = time.monotonic() + _MAX_WAIT
+        while (remaining := deadline - time.monotonic()) > 0:
             try:
-                resp = await self.client.get(url, timeout=10.0)
+                async with asyncio.timeout(remaining):
+                    resp = await self.client.get(url, timeout=min(10.0, remaining))
+                if time.monotonic() >= deadline:
+                    break
                 resp.raise_for_status()
                 status = resp.json()["data"]["status"]
                 if status == "SUCCEEDED":
@@ -150,8 +143,9 @@ class TwitterScraper(BaseScraper):
                     return False
             except Exception as exc:
                 logger.warning(f"Error polling Apify run {run_id}: {exc}")
-            await asyncio.sleep(_POLL_INTERVAL)
-            elapsed += _POLL_INTERVAL
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(_POLL_INTERVAL, remaining))
         logger.warning(f"Apify run {run_id} timed out after {_MAX_WAIT}s.")
         return False
 
@@ -160,10 +154,12 @@ class TwitterScraper(BaseScraper):
         try:
             resp = await self.client.get(url, timeout=30.0)
             resp.raise_for_status()
-            return resp.json()
+            rows = resp.json()
+            if not isinstance(rows, list):
+                raise ValueError("Invalid Apify dataset")
+            return rows
         except Exception as exc:
-            logger.error(f"Failed to fetch Apify dataset {dataset_id}: {exc}")
-            return []
+            raise RuntimeError("Failed to fetch Apify dataset") from exc
 
     async def fetch_replies_for_item(self, item: ContentItem) -> List[str]:
         """Fetch reply texts for one tweet using scweet search mode."""
@@ -204,7 +200,7 @@ class TwitterScraper(BaseScraper):
         """Convert scweet rows into compact reply lines."""
         min_likes = max(self.config.reply_min_likes, 0)
         tweet_id = str(item.metadata.get("tweet_id") or "")
-        own_author = (item.author or "").lstrip("@")
+        own_author = (item.metadata.get("screen_name") or item.author or "").lstrip("@")
         candidates = []
 
         for row in rows:
@@ -224,7 +220,7 @@ class TwitterScraper(BaseScraper):
                 or user.get("username")
                 or "unknown"
             )
-            if handle and own_author and handle.lower() == own_author.lower():
+            if handle and own_author and handle.lstrip("@").lower() == own_author.lower():
                 continue
 
             text = unescape((row.get("text") or "").strip())
@@ -340,6 +336,7 @@ class TwitterScraper(BaseScraper):
                 profile=self.config.profile,
                 metadata={
                     "tweet_id": numeric_id,
+                    "screen_name": screen_name,
                     "conversation_id": conversation_id,
                     "favorite_count": item.get("favorite_count", 0),
                     "retweet_count": item.get("retweet_count", 0),

@@ -1,11 +1,13 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 
 from src.models import RedditConfig, RedditSubredditConfig, RedditUserConfig
-from src.scrapers.reddit import REDDIT_HEADERS, RedditScraper
+from src.scrapers.reddit import REDDIT_HEADERS, RedditScraper, _retry_after_seconds
 
 
 def _make_config(fetch_comments: int = 1, profile: str | None = None) -> RedditConfig:
@@ -74,6 +76,56 @@ def _listing_payload() -> dict:
             ]
         }
     }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("7", 7),
+        ("not a date", 5),
+        (None, 5),
+    ],
+)
+def test_retry_after_delta_and_invalid_fallback(value, expected):
+    assert _retry_after_seconds(value) == expected
+
+
+def test_retry_after_http_date_rounds_up_and_expired_date_is_zero():
+    now = datetime(2026, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+    assert _retry_after_seconds(
+        format_datetime(now + timedelta(seconds=1), usegmt=True), now
+    ) == 1
+    assert _retry_after_seconds(
+        format_datetime(now - timedelta(seconds=1), usegmt=True), now
+    ) == 0
+
+
+def test_reddit_429_http_date_retries_once(monkeypatch):
+    requests = []
+    now = datetime.now(timezone.utc)
+    retry_at = now + timedelta(seconds=5)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": format_datetime(retry_at, usegmt=True)},
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    sleep = AsyncMock()
+    monkeypatch.setattr("src.scrapers.reddit.asyncio.sleep", sleep)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    scraper = RedditScraper(_make_config(fetch_comments=0), client)
+
+    response = asyncio.run(scraper._reddit_get("https://www.reddit.com/test", {}))
+    asyncio.run(client.aclose())
+
+    assert response == {"ok": True}
+    assert len(requests) == 2
+    sleep.assert_awaited_once()
+    assert sleep.await_args.args[0] in {4, 5}
 
 
 def _old_listing_html() -> str:
@@ -153,7 +205,7 @@ def test_reddit_comment_403_degrades_to_post_without_comments():
     client = httpx.AsyncClient(transport=transport)
     scraper = RedditScraper(_make_config(fetch_comments=3), client)
 
-    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1)))
+    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1))).items
     asyncio.run(client.aclose())
 
     assert len(items) == 1
@@ -176,7 +228,7 @@ def test_reddit_listing_uses_old_reddit_first():
         _make_config(fetch_comments=0, profile="subreddit-profile"), client
     )
 
-    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1)))
+    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1))).items
     asyncio.run(client.aclose())
 
     assert [str(request.url.host) for request in requests] == ["old.reddit.com"]
@@ -215,6 +267,8 @@ def test_reddit_listing_old_failure_falls_back_to_json_then_rss():
                 </feed>
                 """,
             )
+        if "/comments/" in request.url.path:
+            return httpx.Response(403, text="blocked")
         raise AssertionError(f"unexpected url: {request.url}")
 
     transport = httpx.MockTransport(handler)
@@ -223,13 +277,15 @@ def test_reddit_listing_old_failure_falls_back_to_json_then_rss():
         _make_config(fetch_comments=3, profile="rss-profile"), client
     )
 
-    items = asyncio.run(scraper.fetch(datetime(2029, 12, 31, tzinfo=timezone.utc)))
+    items = asyncio.run(scraper.fetch(datetime(2029, 12, 31, tzinfo=timezone.utc))).items
     asyncio.run(client.aclose())
 
     assert [request.url.path for request in requests] == [
         "/r/LocalLLaMA/hot/",
         "/r/LocalLLaMA/hot.json",
         "/r/LocalLLaMA/hot/.rss",
+        "/r/LocalLLaMA/comments/rss123/",
+        "/r/LocalLLaMA/comments/rss123.json",
     ]
     assert len(items) == 1
     assert items[0].title == "RSS fallback post"
@@ -252,7 +308,7 @@ def test_reddit_user_profile_propagates() -> None:
 
     items = asyncio.run(
         scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1))
-    )
+    ).items
 
     assert len(items) == 1
     assert items[0].profile == "user-profile"
@@ -273,7 +329,7 @@ def test_reddit_comments_use_old_reddit_first():
     client = httpx.AsyncClient(transport=transport)
     scraper = RedditScraper(_make_config(fetch_comments=2), client)
 
-    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1)))
+    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1))).items
     asyncio.run(client.aclose())
 
     assert [str(request.url.host) for request in requests] == [
@@ -307,7 +363,7 @@ def test_reddit_subreddits_are_fetched_sequentially():
     client = httpx.AsyncClient(transport=transport)
     scraper = RedditScraper(_make_two_subreddit_config(fetch_comments=0), client)
 
-    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1)))
+    items = asyncio.run(scraper.fetch(datetime.now(timezone.utc) - timedelta(hours=1))).items
     asyncio.run(client.aclose())
 
     assert requests == ["/r/LocalLLaMA/hot/", "/r/MachineLearning/hot/"]
@@ -315,3 +371,92 @@ def test_reddit_subreddits_are_fetched_sequentially():
         "LocalLLaMA",
         "MachineLearning",
     ]
+
+
+_RSS_FEED = """<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>t3_rss123</id><title>RSS post</title>
+    <link href="https://www.reddit.com/r/LocalLLaMA/comments/rss123/test/" />
+    <updated>2030-01-01T00:00:00+00:00</updated>
+    <summary type="html">RSS body</summary>
+  </entry>
+</feed>"""
+
+
+@pytest.mark.parametrize("mode", ["html", "json", "blocked", "timeout", "disabled", "cancelled"])
+def test_rss_fallback_fetches_comments_best_effort(mode):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if "/comments/" in request.url.path:
+            assert request.url.params["limit"] == "1"
+            assert request.url.params["sort"] == "top"
+            if mode == "cancelled":
+                raise asyncio.CancelledError()
+            if mode == "timeout":
+                raise httpx.ReadTimeout("comments unavailable", request=request)
+            if mode == "html":
+                return httpx.Response(200, text=_old_comments_html())
+            if mode == "json" and request.url.host == "www.reddit.com":
+                return httpx.Response(200, json=[{}, {"data": {"children": [
+                    {"kind": "t1", "data": {"author": "bob", "body": "lower comment", "score": 2}},
+                    {"kind": "t1", "data": {"author": "alice", "body": "top comment", "score": 10}},
+                ]}}])
+            return httpx.Response(403)
+        if request.url.path.endswith("/.rss"):
+            return httpx.Response(200, text=_RSS_FEED)
+        return httpx.Response(403)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            scraper = RedditScraper(_make_config(fetch_comments=0 if mode == "disabled" else 1), client)
+            return await scraper.fetch(datetime(2029, 12, 31, tzinfo=timezone.utc))
+
+    if mode == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(run())
+        return
+    result = asyncio.run(run())
+    assert result.status == "success"
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.content.startswith("RSS body")
+    assert item.metadata["score"] is None
+    assert item.metadata["num_comments"] is None
+    assert item.metadata["fallback"] == "rss"
+    if mode in {"html", "json"}:
+        assert "--- Top Comments ---" in item.content
+        assert "[alice (10 pts)]" in item.content
+        assert "bob" not in item.content
+    else:
+        assert item.content == "RSS body"
+    comment_requests = [r for r in requests if "/comments/" in r.url.path]
+    assert len(comment_requests) == (0 if mode == "disabled" else 1 if mode == "html" else 2)
+
+
+@pytest.mark.parametrize("entry_id,link,date,expected", [
+    ("t3_rss123", "https://example.com/article", "2030-01-01", "rss123"),
+    ("opaque-id", "https://www.reddit.com/r/LocalLLaMA/comments/url123/title/", "2030-01-01", "url123"),
+    ("opaque-id", "https://www.reddit.com/r/LocalLLaMA/", "2030-01-01", None),
+    ("opaque-id", "https://example.com/r/LocalLLaMA/comments/url123/", "2030-01-01", None),
+    ("t3_rss123", "https://www.reddit.com/r/LocalLLaMA/comments/rss123/", "2029-01-01", None),
+])
+def test_rss_only_fetches_comments_for_recent_identifiable_posts(entry_id, link, date, expected):
+    feed = _RSS_FEED.replace("t3_rss123", entry_id).replace(
+        "https://www.reddit.com/r/LocalLLaMA/comments/rss123/test/", link,
+    ).replace("2030-01-01", date)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, text=feed))) as client:
+            config = _make_config()
+            scraper = RedditScraper(config, client)
+            scraper._fetch_comments = AsyncMock(return_value=[])
+            items = await scraper._fetch_subreddit_rss(config.subreddits[0], datetime(2029, 12, 31, tzinfo=timezone.utc))
+            if expected:
+                scraper._fetch_comments.assert_awaited_once_with("LocalLLaMA", expected)
+            else:
+                scraper._fetch_comments.assert_not_awaited()
+            assert len(items) == (0 if date == "2029-01-01" else 1)
+
+    asyncio.run(run())

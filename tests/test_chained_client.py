@@ -3,7 +3,10 @@
 import asyncio
 from datetime import datetime, timezone
 
+import httpx
 import pytest
+from anthropic import APIConnectionError as AnthropicConnectionError
+from openai import APIConnectionError as OpenAIConnectionError
 
 from src.ai.client import ChainedAIClient, _create_chained_client
 from src.models import AIConfig, AIProvider, AI_PROVIDER_DEFAULTS
@@ -82,6 +85,27 @@ def test_fallback_on_rate_limit():
     cfg1 = _make_config(AIProvider.OPENAI)
     cfg2 = _make_config(AIProvider.OLLAMA)
     client1 = _DummyClient(exc=Exception("429 rate limit exceeded"))
+    client2 = _DummyClient(result="fallback ok")
+
+    chained = ChainedAIClient([cfg1, cfg2], clients=[client1, client2])
+    result = asyncio.run(chained.complete("sys", "usr"))
+
+    assert result == "fallback ok"
+    assert len(client1.calls) == 1
+    assert len(client2.calls) == 1
+
+
+@pytest.mark.parametrize("provider_error", ["openai", "anthropic", "httpx"])
+def test_fallback_on_transport_errors(provider_error):
+    request = httpx.Request("POST", "https://example.com/v1/chat/completions")
+    error = {
+        "openai": OpenAIConnectionError(request=request),
+        "anthropic": AnthropicConnectionError(request=request),
+        "httpx": httpx.ConnectError("connection refused", request=request),
+    }[provider_error]
+    cfg1 = _make_config(AIProvider.OPENAI)
+    cfg2 = _make_config(AIProvider.OLLAMA)
+    client1 = _DummyClient(exc=error)
     client2 = _DummyClient(result="fallback ok")
 
     chained = ChainedAIClient([cfg1, cfg2], clients=[client1, client2])
@@ -177,7 +201,8 @@ def test_create_chained_client_parses_chain():
 
 def test_create_chained_client_uses_provider_defaults_without_leaking_base_url():
     """Every heterogeneous entry gets its own connection defaults."""
-    providers = list(AIProvider)
+    # ChatGPT requires a model selected from its account-specific catalog.
+    providers = [provider for provider in AIProvider if provider != AIProvider.OPENAI_CHATGPT]
     config = AIConfig(
         provider=AIProvider.OPENAI,
         provider_chain=",".join(provider.value for provider in providers),
@@ -269,3 +294,60 @@ def test_create_chained_client_rejects_unknown_provider():
     )
     with pytest.raises(ValueError, match="Unsupported AI provider in chain"):
         _create_chained_client(config)
+
+
+def test_pipeline_preserves_batch_settings_with_provider_chain(tmp_path, monkeypatch):
+    from pathlib import Path
+    from src.ai.analyzer import ContentAnalyzer
+    from src.ai.enricher import ContentEnricher
+    from src.models import Config, ContentItem, SourceType
+    from src.orchestrator import HorizonOrchestrator
+    from src.processing import ProfileRegistry
+    from src.storage.manager import StorageManager
+
+    config = Config.model_validate({
+        "ai": {
+            "provider": "openai", "model": "test", "api_key_env": "UNUSED_KEY",
+            "provider_chain": "openai,ollama", "analysis_concurrency": 3,
+            "enrichment_concurrency": 2, "throttle_sec": 1.25,
+        },
+        "sources": {},
+    })
+    profiles = ProfileRegistry.load(Path(__file__).resolve().parents[1] / "profiles", "tech-news")
+    orchestrator = HorizonOrchestrator(config, StorageManager(str(tmp_path)), profiles=profiles)
+    items = [ContentItem(
+        id=f"rss:test:{i}", source_type=SourceType.RSS, title=f"Story {i}",
+        url=f"https://example.com/{i}", published_at=datetime.now(timezone.utc),
+    ) for i in range(5)]
+    active = {"analysis": 0, "enrichment": 0}
+    peak = dict(active)
+    delays = []
+    sleep = asyncio.sleep
+
+    async def record_sleep(delay):
+        if delay:
+            delays.append(delay)
+        await sleep(0)
+
+    async def process(stage, client):
+        assert isinstance(client, ChainedAIClient)
+        active[stage] += 1
+        peak[stage] = max(peak[stage], active[stage])
+        await sleep(0)
+        active[stage] -= 1
+
+    async def analyze(self, item):
+        await process("analysis", self.client)
+
+    async def enrich(self, item):
+        await process("enrichment", self.client)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+    monkeypatch.setattr(ContentAnalyzer, "_analyze_item", analyze)
+    monkeypatch.setattr(ContentEnricher, "_enrich_item", enrich)
+    asyncio.run(orchestrator.analyze_items(items))
+    enriched = asyncio.run(orchestrator.enrich_items(items))
+
+    assert peak == {"analysis": 3, "enrichment": 2}
+    assert delays == [1.25] * 4
+    assert enriched.succeeded_count == 5
