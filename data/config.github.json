@@ -7,10 +7,7 @@
     "temperature": 0.3,
     "max_tokens": 8192,
     "throttle_sec": 1,
-    "languages": [
-      "zh",
-      "en"
-    ],
+    "languages": ["zh", "en"],
     "analysis_concurrency": 5,
     "enrichment_concurrency": 5
   },
@@ -18,6 +15,10 @@
     "profiles_dir": "profiles",
     "default_profile": "tech-news",
     "profile_settings": {
+      "ai-tech": {
+        "threshold": 6.0,
+        "topic_dedup": true
+      },
       "tech-news": {
         "threshold": 7.0,
         "topic_dedup": true
@@ -34,108 +35,67 @@
   },
   "sources": {
     "github": [
-      {
-        "type": "user_events",
-        "username": "karpathy",
-        "enabled": true,
-        "profile": "tech-news"
-      },
-      {
-        "type": "repo_releases",
-        "owner": "vllm-project",
-        "repo": "vllm",
-        "enabled": true,
-        "profile": "tech-news"
-      },
-      {
-        "type": "repo_releases",
-        "owner": "sgl-project",
-        "repo": "sglang",
-        "enabled": true,
-        "profile": "tech-news"
-      },
-      {
-        "type": "repo_releases",
-        "owner": "triton-lang",
-        "repo": "triton",
-        "enabled": true,
-        "profile": "tech-news"
-      }
+      {"type": "user_events", "username": "karpathy", "enabled": true, "category": "ai-models", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "vllm-project", "repo": "vllm", "enabled": true, "category": "llm-inference", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "sgl-project", "repo": "sglang", "enabled": true, "category": "llm-inference", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "huggingface", "repo": "trl", "enabled": true, "category": "training", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "unslothai", "repo": "unsloth", "enabled": true, "category": "fine-tuning", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "Unstructured-IO", "repo": "unstructured", "enabled": true, "category": "document-parsing", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "FlagOpen", "repo": "FlagEmbedding", "enabled": true, "category": "embedding", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "langchain-ai", "repo": "langgraph", "enabled": true, "category": "workflow", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "microsoft", "repo": "autogen", "enabled": true, "category": "multi-agent", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "crewAIInc", "repo": "crewAI", "enabled": true, "category": "multi-agent", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "modelcontextprotocol", "repo": "servers", "enabled": true, "category": "mcp", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "OpenHands", "repo": "OpenHands", "enabled": true, "category": "coding-agent", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "run-llama", "repo": "llama_index", "enabled": true, "category": "ai-rag", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "chroma-core", "repo": "chroma", "enabled": true, "category": "vector-db", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "microsoft", "repo": "graphrag", "enabled": true, "category": "graphrag", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "HKUDS", "repo": "LightRAG", "enabled": true, "category": "graphrag", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "neo4j", "repo": "neo4j", "enabled": true, "category": "knowledge-graph", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "getzep", "repo": "graphiti", "enabled": true, "category": "knowledge-graph", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "letta-ai", "repo": "letta", "enabled": true, "category": "memory", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "livekit", "repo": "agents", "enabled": true, "category": "realtime", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "pipecat-ai", "repo": "pipecat", "enabled": true, "category": "voice", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "BerriAI", "repo": "litellm", "enabled": true, "category": "gateway", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "langfuse", "repo": "langfuse", "enabled": true, "category": "observability", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "Arize-ai", "repo": "phoenix", "enabled": true, "category": "observability", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "promptfoo", "repo": "promptfoo", "enabled": true, "category": "eval", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "NVIDIA-NeMo", "repo": "Guardrails", "enabled": true, "category": "guardrails", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "protectai", "repo": "rebuff", "enabled": true, "category": "guardrails", "profile": "tech-news"},
+      {"type": "repo_releases", "owner": "microsoft", "repo": "semantic-kernel", "enabled": true, "category": "framework", "profile": "tech-news"}
     ],
     "hackernews": {
       "enabled": true,
       "fetch_top_stories": 30,
       "min_score": 150,
-      "profile": "tech-news"
+      "category": "tech",
+      "profile": ["ai-tech", "tech-news"]
     },
     "rss": [
-      {
-        "name": "Simon Willison",
-        "url": "https://simonwillison.net/atom/everything/",
-        "enabled": true,
-        "category": "ai-tools",
-        "profile": "tech-news"
-      },
-      {
-        "name": "vLLM Blog",
-        "url": "https://vllm.ai/blog/rss.xml",
-        "enabled": true,
-        "category": "llm-inference",
-        "profile": "tech-blog",
-        "content_extractor": "trafilatura"
-      },
-      {
-        "name": "Sean Goedecke",
-        "url": "https://www.seangoedecke.com/rss.xml",
-        "enabled": true,
-        "category": "software-engineering",
-        "profile": "tech-blog",
-        "content_extractor": "trafilatura"
-      },
-      {
-        "name": "CNBC Finance",
-        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
-        "enabled": true,
-        "category": "finance",
-        "profile": "finance-news",
-        "content_extractor": "trafilatura"
-      },
-      {
-        "name": "GitHub Trending - Daily",
-        "url": "https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml",
-        "enabled": true,
-        "category": "github-trending",
-        "profile": "tech-news"
-      },
-      {
-        "name": "Semianalysis",
-        "url": "https://newsletter.semianalysis.com/feed",
-        "enabled": true,
-        "category": "semiconductors",
-        "profile": "tech-news"
-      }
+      {"name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "enabled": true, "category": "prompting", "profile": "ai-tech"},
+      {"name": "Lil'Log (Lilian Weng)", "url": "https://lilianweng.github.io/index.xml", "enabled": true, "category": "agent-loop", "profile": "ai-tech", "content_extractor": "trafilatura"},
+      {"name": "Eugene Yan", "url": "https://eugeneyan.com/rss/", "enabled": true, "category": "ai-rag", "profile": "ai-tech", "content_extractor": "trafilatura"},
+      {"name": "Pinecone Blog", "url": "https://www.pinecone.io/blog/rss.xml", "enabled": true, "category": "vector-db", "profile": "ai-tech"},
+      {"name": "Neo4j Blog", "url": "https://neo4j.com/blog/feed/", "enabled": true, "category": "knowledge-graph", "profile": "ai-tech", "content_extractor": "trafilatura"},
+      {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "enabled": true, "category": "ai-models", "profile": "ai-tech"},
+      {"name": "Ahead of AI (Sebastian Raschka)", "url": "https://magazine.sebastianraschka.com/feed", "enabled": true, "category": "training", "profile": "ai-tech", "content_extractor": "trafilatura"},
+      {"name": "vLLM Blog", "url": "https://vllm.ai/blog/rss.xml", "enabled": true, "category": "llm-inference", "profile": "ai-tech", "content_extractor": "trafilatura"},
+      {"name": "OpenAI News", "url": "https://openai.com/news/rss.xml", "enabled": true, "category": "model-release", "profile": "tech-news"},
+      {"name": "量子位", "url": "https://wechat2rss.xlab.app/feed/7131b577c61365cb47e81000738c10d872685908.xml", "enabled": true, "category": "ai-news", "profile": "tech-news"},
+      {"name": "新智元", "url": "https://wechat2rss.xlab.app/feed/ede30346413ea70dbef5d485ea5cbb95cca446e7.xml", "enabled": true, "category": "ai-news", "profile": "tech-news"},
+      {"name": "AIHOT 日报", "url": "https://aihot.news/feed/daily.xml", "enabled": true, "category": "ai-news", "profile": "tech-news"},
+      {"name": "GitHub Trending - Daily", "url": "https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml", "enabled": true, "category": "github-trending", "profile": "tech-news"},
+      {"name": "Semianalysis", "url": "https://newsletter.semianalysis.com/feed", "enabled": true, "category": "semiconductors", "profile": "tech-news"},
+      {"name": "CNBC Finance", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", "enabled": true, "category": "finance", "profile": "finance-news", "content_extractor": "trafilatura"}
     ],
     "reddit": {
       "enabled": true,
       "subreddits": [
-        {
-          "subreddit": "MachineLearning",
-          "enabled": true,
-          "sort": "hot",
-          "time_filter": "day",
-          "fetch_limit": 10,
-          "min_score": 60,
-          "profile": "tech-news"
-        },
-        {
-          "subreddit": "LocalLLaMA",
-          "enabled": true,
-          "sort": "hot",
-          "time_filter": "day",
-          "fetch_limit": 10,
-          "min_score": 60,
-          "profile": "tech-news"
-        }
+        {"subreddit": "MachineLearning", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 10, "min_score": 60, "category": "ai-models", "profile": ["ai-tech", "tech-news"]},
+        {"subreddit": "LocalLLaMA", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 10, "min_score": 60, "category": "ai-models", "profile": ["ai-tech", "tech-news"]},
+        {"subreddit": "LLMDevs", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 10, "min_score": 40, "category": "agent-loop", "profile": ["ai-tech", "tech-news"]},
+        {"subreddit": "LangChain", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 10, "min_score": 20, "category": "ai-rag", "profile": ["ai-tech", "tech-news"]},
+        {"subreddit": "PromptEngineering", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 10, "min_score": 20, "category": "prompting", "profile": ["ai-tech", "tech-news"]}
       ],
       "users": [],
       "fetch_comments": 10
@@ -143,28 +103,149 @@
     "telegram": {
       "enabled": true,
       "channels": [
-        {
-          "channel": "zaihuapd",
-          "enabled": true,
-          "fetch_limit": 20,
-          "profile": ["tech-news", "finance-news"]
-        }
+        {"channel": "zaihuapd", "enabled": true, "fetch_limit": 20, "category": "ai-news", "profile": ["ai-tech", "tech-news", "finance-news"]}
       ]
+    },
+    "ossinsight": {
+      "enabled": true,
+      "period": "past_24_hours",
+      "languages": ["All", "Python"],
+      "keywords": [
+        "agent", "agentic", "llm", "rag", "graphrag", "knowledge graph", "ontology",
+        "prompt", "context engineering", "mcp", "a2a", "multi-agent", "langgraph",
+        "workflow", "state machine", "eval", "evals", "observability", "tracing",
+        "llm-as-judge", "ragas", "rerank", "vector", "embedding", "chunking", "ocr",
+        "document parsing", "memory", "guardrail", "sandbox", "structured output",
+        "function calling", "replanning", "fine-tuning", "lora", "quantization",
+        "grpo", "test-time compute", "inference", "vllm", "sglang", "realtime",
+        "voice", "vision", "multimodal", "coding agent", "ai gateway", "prompt caching",
+        "synthetic data", "benchmark", "llmops"
+      ],
+      "min_stars": 10,
+      "max_items": 20,
+      "category": "github-trending",
+      "profile": ["ai-tech", "tech-news"]
+    },
+    "gdelt": {
+      "enabled": true,
+      "query": "\"AI agent\" OR \"agentic workflow\" OR \"LLM evaluation\" OR \"context engineering\" OR \"retrieval augmented generation\" OR \"knowledge graph\" OR ontology OR \"model routing\" OR \"AI gateway\"",
+      "mode": "ArtList",
+      "max_records": 30,
+      "category": "ai-news",
+      "profile": ["ai-tech", "tech-news"]
+    },
+    "google_news": {
+      "enabled": true,
+      "query": "\"AI agent\" OR \"LLM eval\" OR RAG OR \"context engineering\" OR GraphRAG OR \"knowledge graph\" OR ontology OR \"multi-agent\" OR \"model routing\" OR \"document AI\" OR \"voice agent\" OR LLMOps",
+      "language": "en",
+      "country": "US",
+      "max_results": 30,
+      "category": "ai-news",
+      "profile": ["ai-tech", "tech-news"]
+    },
+    "twitter": {
+      "enabled": false,
+      "mode": "apify",
+      "users": ["karpathy"],
+      "keywords": [
+        "AI agent", "agent loop", "goal-driven agent", "plan-and-execute", "ReAct",
+        "dynamic workflow", "prompt chaining", "multi-agent", "A2A", "MCP",
+        "LLM eval", "LLM-as-judge", "trajectory eval", "context engineering",
+        "RAG", "reranking", "chunking", "GraphRAG", "ontology", "knowledge graph",
+        "agent observability", "guardrails", "human-in-the-loop", "structured output",
+        "fine-tuning", "GRPO", "test-time compute", "RAGAS", "agentic UX",
+        "LLMOps", "AI gateway", "prompt caching", "document AI", "voice agent", "computer use"
+      ],
+      "fetch_limit": 10,
+      "category": "ai-news",
+      "profile": ["ai-tech", "tech-news"]
     }
   },
   "collection": {
     "time_window_hours": 24
   },
   "digest": {
-    "max_items": null,
-    "profile_order": [
-      "tech-news",
-      "tech-blog",
-      "finance-news"
-    ],
-    "category_groups": {},
+    "max_items": 30,
+    "profile_order": ["ai-tech", "tech-news", "tech-blog", "finance-news"],
+    "category_groups": {
+      "models": {
+        "name": "模型 / 推理 / 训练适配",
+        "limit": 4,
+        "categories": ["ai-models", "model-release", "llm-inference", "model-routing", "fine-tuning", "training", "quantization", "test-time-compute"]
+      },
+      "data_engineering": {
+        "name": "数据与文档工程",
+        "limit": 2,
+        "categories": ["data-engineering", "chunking", "embedding", "ocr", "document-parsing", "synthetic-data", "metadata", "acl"]
+      },
+      "knowledge": {
+        "name": "知识图谱 / GraphRAG / 本体论",
+        "limit": 2,
+        "categories": ["knowledge-graph", "graphrag", "ontology", "semantic-web", "knowledge-representation", "entity-resolution"]
+      },
+      "rag": {
+        "name": "检索与 RAG",
+        "limit": 3,
+        "categories": ["ai-rag", "retrieval", "rerank", "vector-db", "hybrid-search"]
+      },
+      "context": {
+        "name": "上下文 / 提示词 / 记忆",
+        "limit": 3,
+        "categories": ["prompting", "context-engineering", "compaction", "memory", "checkpoint", "structured-output", "promptops"]
+      },
+      "agent_loop": {
+        "name": "循环 / 目标 / 动态动作流编排",
+        "limit": 3,
+        "categories": ["agent-loop", "goal", "planning", "replanning", "dag", "state-machine", "orchestration", "workflow"]
+      },
+      "multi_agent": {
+        "name": "多智能体 / 协议",
+        "limit": 2,
+        "categories": ["multi-agent", "a2a", "mcp", "handoff", "shared-state", "identity"]
+      },
+      "tools_runtime": {
+        "name": "工具 / 沙箱 / 编码 Agent / Harness",
+        "limit": 2,
+        "categories": ["function-calling", "sandbox", "connector", "coding-agent", "harness", "computer-use"]
+      },
+      "multimodal": {
+        "name": "多模态与实时交互",
+        "limit": 2,
+        "categories": ["voice", "vision", "document-ai", "realtime", "video", "embodied"]
+      },
+      "evaluation": {
+        "name": "评测 / 可观测 / Benchmark",
+        "limit": 3,
+        "categories": ["eval", "evals", "observability", "tracing", "llm-as-judge", "benchmark"]
+      },
+      "ops": {
+        "name": "可靠性 / LLMOps / 成本",
+        "limit": 2,
+        "categories": ["reliability", "llmops", "gateway", "drift", "caching", "cost"]
+      },
+      "security": {
+        "name": "安全 / 治理 / 合规",
+        "limit": 2,
+        "categories": ["security", "guardrails", "privacy", "pii", "compliance", "red-team", "hitl"]
+      },
+      "product": {
+        "name": "产品 / 交互 / 应用交付",
+        "limit": 2,
+        "categories": ["agentic-ux", "streaming", "application", "framework", "vertical"]
+      },
+      "ai_news": {
+        "name": "AI 资讯 / 生态",
+        "limit": 2,
+        "categories": ["ai-news", "ai-tools", "github-trending", "tech", "software-engineering", "semiconductors"]
+      },
+      "finance": {
+        "name": "财经",
+        "limit": 1,
+        "categories": ["finance", "equities"]
+      }
+    },
     "default_group": "other",
-    "default_group_limit": null
+    "default_group_limit": 2
   },
   "webhook": {
     "enabled": true,
@@ -174,9 +255,7 @@
     "platform": "feishu",
     "layout": "collapsible",
     "fallback_layout": "markdown",
-    "languages": [
-      "zh"
-    ],
+    "languages": ["zh"],
     "request_body": {
       "msg_type": "interactive",
       "card": {
